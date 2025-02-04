@@ -11,8 +11,8 @@ import (
 	"path"
 	"time"
 
+	"github.com/pterm/pterm"
 	tls "github.com/refraction-networking/utls"
-	"github.com/schollz/progressbar/v3"
 	"golang.org/x/net/http2"
 )
 
@@ -236,43 +236,67 @@ func (c *Client) DownloadFile(url string, filepath string, opts *RequestOption) 
 	}
 	defer file.Close()
 
-	// 创建进度条，降低刷新频率
-	bar := progressbar.NewOptions64(
-		totalSize,
-		progressbar.OptionSetDescription("downloading"),
-		progressbar.OptionSetWriter(os.Stderr),
-		progressbar.OptionShowBytes(true),
-		progressbar.OptionThrottle(65*time.Millisecond), // 降低刷新频率
-		progressbar.OptionShowCount(),
-		progressbar.OptionSetWidth(15),
-		progressbar.OptionSetRenderBlankState(true),
-	)
+	// 创建进度条
+	spinner, _ := pterm.DefaultSpinner.WithRemoveWhenDone(true).Start()
+	progress := pterm.DefaultProgressbar.WithTotal(int(totalSize)).
+		WithRemoveWhenDone(true)
 
 	// 设置断点续传的进度
 	if startPos > 0 {
-		bar.Add64(startPos)
+		progress.Add(int(startPos))
 	}
 
 	// 使用缓冲读取提高性能
 	bufSize := 32 * 1024 // 32KB buffer
 	buf := make([]byte, bufSize)
+	lastUpdate := time.Now()
+	var downloaded int64 = startPos
+	fileName := path.Base(filepath)
+
+	// 更新显示的函数
+	updateDisplay := func() {
+		progress.Current = int(downloaded)
+		percentage := float64(downloaded) / float64(totalSize) * 100
+		elapsed := time.Since(lastUpdate).Seconds()
+		speed := float64(downloaded-startPos) / elapsed / 1024 / 1024 // MB/s
+
+		// 格式化显示信息
+		status := fmt.Sprintf("%s [%.1f%%] (%.1f MB/s)",
+			fileName,
+			percentage,
+			speed,
+		)
+		spinner.UpdateText(status)
+		lastUpdate = time.Now()
+	}
+
 	for {
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
 			// 写入文件
 			if _, werr := file.Write(buf[:n]); werr != nil {
+				spinner.Fail(fmt.Sprintf("Failed to download %s", fileName))
 				return fmt.Errorf("failed to write to file: %w", werr)
 			}
-			// 更新进度条
-			bar.Add(n)
+
+			downloaded += int64(n)
+
+			// 降低刷新频率到每500ms更新一次
+			if time.Since(lastUpdate) > 1000*time.Millisecond {
+				updateDisplay()
+			}
 		}
 		if err == io.EOF {
+			// 确保最后更新一次显示
+			updateDisplay()
 			break
 		}
 		if err != nil {
+			spinner.Fail(fmt.Sprintf("Failed to download %s", fileName))
 			return fmt.Errorf("failed to read response: %w", err)
 		}
 	}
 
+	spinner.Success(fmt.Sprintf("Downloaded %s", fileName))
 	return nil
 }
