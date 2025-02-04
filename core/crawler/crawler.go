@@ -33,7 +33,7 @@ func NewCrawler(cfg *config.Config) *Crawler {
 func (c *Crawler) Start(url string) error {
 	logger.Info("Starting crawler for URL: " + url)
 	// 根据URL选择合适的解析器
-	c.parser = parsers.GetParser(url)
+	c.parser = parsers.GetParser(url, c.client)
 
 	// 开始爬取
 	html, err := c.client.GetHTML(url, nil)
@@ -71,6 +71,7 @@ func (c *Crawler) downloadMedia(media *parsers.MediaInfo) {
 	if media.URL == nil {
 		logger.Error("Invalid media URL")
 		return
+
 	}
 
 	// 构建保存路径

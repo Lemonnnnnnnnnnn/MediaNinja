@@ -16,6 +16,7 @@ type TelegraphParser struct {
 func (p *TelegraphParser) Parse(html string) (*ParseResult, error) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
 	if err != nil {
+
 		return nil, fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
@@ -55,6 +56,7 @@ func (p *TelegraphParser) Parse(html string) (*ParseResult, error) {
 			MediaType: Image,
 			Filename:  filename,
 		})
+
 	})
 
 	return result, nil
