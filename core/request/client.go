@@ -11,7 +11,6 @@ import (
 	"path"
 	"time"
 
-	"github.com/pterm/pterm"
 	tls "github.com/refraction-networking/utls"
 	"golang.org/x/net/http2"
 )
@@ -236,67 +235,33 @@ func (c *Client) DownloadFile(url string, filepath string, opts *RequestOption) 
 	}
 	defer file.Close()
 
-	// 创建进度条
-	spinner, _ := pterm.DefaultSpinner.WithRemoveWhenDone(true).Start()
-	progress := pterm.DefaultProgressbar.WithTotal(int(totalSize)).
-		WithRemoveWhenDone(true)
-
-	// 设置断点续传的进度
-	if startPos > 0 {
-		progress.Add(int(startPos))
-	}
+	// 创建进度跟踪器
+	progress := NewDownloadProgress(path.Base(filepath), totalSize, startPos)
 
 	// 使用缓冲读取提高性能
 	bufSize := 32 * 1024 // 32KB buffer
 	buf := make([]byte, bufSize)
-	lastUpdate := time.Now()
-	var downloaded int64 = startPos
-	fileName := path.Base(filepath)
-
-	// 更新显示的函数
-	updateDisplay := func() {
-		progress.Current = int(downloaded)
-		percentage := float64(downloaded) / float64(totalSize) * 100
-		elapsed := time.Since(lastUpdate).Seconds()
-		speed := float64(downloaded-startPos) / elapsed / 1024 / 1024 // MB/s
-
-		// 格式化显示信息
-		status := fmt.Sprintf("%s [%.1f%%] (%.1f MB/s)",
-			fileName,
-			percentage,
-			speed,
-		)
-		spinner.UpdateText(status)
-		lastUpdate = time.Now()
-	}
 
 	for {
 		n, err := resp.Body.Read(buf)
 		if n > 0 {
 			// 写入文件
 			if _, werr := file.Write(buf[:n]); werr != nil {
-				spinner.Fail(fmt.Sprintf("Failed to download %s", fileName))
+				progress.Fail(werr)
 				return fmt.Errorf("failed to write to file: %w", werr)
 			}
 
-			downloaded += int64(n)
-
-			// 降低刷新频率到每500ms更新一次
-			if time.Since(lastUpdate) > 1000*time.Millisecond {
-				updateDisplay()
-			}
+			progress.Update(int64(n))
 		}
 		if err == io.EOF {
-			// 确保最后更新一次显示
-			updateDisplay()
+			progress.Success()
 			break
 		}
 		if err != nil {
-			spinner.Fail(fmt.Sprintf("Failed to download %s", fileName))
+			progress.Fail(err)
 			return fmt.Errorf("failed to read response: %w", err)
 		}
 	}
 
-	spinner.Success(fmt.Sprintf("Downloaded %s", fileName))
 	return nil
 }

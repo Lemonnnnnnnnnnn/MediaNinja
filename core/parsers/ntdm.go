@@ -161,7 +161,6 @@ func (p *NTDMParser) parseYhdmURL(url string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to decrypt video info: %w", err)
 	}
-	log.Printf("Successfully decrypted video URL: %s", truncateString(decrypted, 50))
 	return decrypted, nil
 }
 
@@ -205,12 +204,4 @@ func decryptVideoInfo(encryptedData, btToken string) (string, error) {
 	}
 
 	return string(decrypted[:len(decrypted)-paddingLen]), nil
-}
-
-// truncateString 用于截断长字符串，避免日志过长
-func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
 }

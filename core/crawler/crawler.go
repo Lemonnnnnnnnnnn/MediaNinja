@@ -71,7 +71,6 @@ func (c *Crawler) downloadMedia(media *parsers.MediaInfo) {
 	if media.URL == nil {
 		logger.Error("Invalid media URL")
 		return
-
 	}
 
 	// 构建保存路径
@@ -108,7 +107,7 @@ func (c *Crawler) downloadMedia(media *parsers.MediaInfo) {
 	}
 
 	// 下载文件
-	logger.Info(fmt.Sprintf("Downloading %s to %s", media.URL.String(), savePath))
+	logger.Info(fmt.Sprintf("Starting download of %s", filename))
 
 	// 使用 parser 的下载器进行下载
 	err := c.parser.GetDownloader().Download(c.client, media.URL.String(), savePath)
