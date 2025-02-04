@@ -36,7 +36,7 @@ func (c *Crawler) Start(url string) error {
 	c.parser = parsers.GetParser(url)
 
 	// 开始爬取
-	html, err := c.client.GetHTML(url)
+	html, err := c.client.GetHTML(url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to fetch URL: %w", err)
 	}
@@ -108,7 +108,10 @@ func (c *Crawler) downloadMedia(media *parsers.MediaInfo) {
 
 	// 下载文件
 	logger.Info(fmt.Sprintf("Downloading %s to %s", media.URL.String(), savePath))
-	if err := c.client.DownloadFile(media.URL.String(), savePath); err != nil {
+
+	// 使用 parser 的下载器进行下载
+	err := c.parser.GetDownloader().Download(c.client, media.URL.String(), savePath)
+	if err != nil {
 		logger.Error(fmt.Sprintf("Failed to download %s: %v", media.URL.String(), err))
 		return
 	}

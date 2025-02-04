@@ -9,7 +9,9 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
-type TelegraphParser struct{}
+type TelegraphParser struct {
+	DefaultDownloader
+}
 
 func (p *TelegraphParser) Parse(html string) (*ParseResult, error) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
@@ -71,4 +73,8 @@ func (p *TelegraphParser) normalizeURL(src string) (*url.URL, error) {
 	}
 
 	return imgURL, nil
+}
+
+func (p *TelegraphParser) GetDownloader() Downloader {
+	return p
 }

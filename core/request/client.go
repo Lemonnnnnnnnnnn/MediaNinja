@@ -8,15 +8,22 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"time"
 
 	tls "github.com/refraction-networking/utls"
+	"github.com/schollz/progressbar/v3"
 	"golang.org/x/net/http2"
 )
 
+type RequestOption struct {
+	Headers map[string]string
+}
+
 type Client struct {
-	client *http.Client
-	proxy  string
+	client         *http.Client
+	proxy          string
+	defaultHeaders map[string]string
 }
 
 type uTransport struct {
@@ -38,7 +45,7 @@ func (*uTransport) newSpec() *tls.ClientHelloSpec {
 			&tls.SupportedCurvesExtension{Curves: []tls.CurveID{tls.GREASE_PLACEHOLDER, tls.X25519, tls.CurveP256, tls.CurveP384}},
 			&tls.SupportedPointsExtension{SupportedPoints: []byte{0x0}},
 			&tls.SessionTicketExtension{},
-			&tls.ALPNExtension{AlpnProtocols: []string{"h2", "http/1.1"}},
+			&tls.ALPNExtension{AlpnProtocols: []string{"http/1.1"}},
 			&tls.StatusRequestExtension{},
 			&tls.SignatureAlgorithmsExtension{SupportedSignatureAlgorithms: []tls.SignatureScheme{0x0403, 0x0804, 0x0401, 0x0503, 0x0805, 0x0501, 0x0806, 0x0601}},
 			&tls.SCTExtension{},
@@ -125,11 +132,37 @@ func NewClient(proxyURL string) *Client {
 	return &Client{
 		client: &http.Client{Transport: transport},
 		proxy:  proxyURL,
+		defaultHeaders: map[string]string{
+			"accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+			"accept-language": "en,zh-CN;q=0.9,zh;q=0.8",
+			"user-agent":      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36",
+		},
 	}
 }
 
-func (c *Client) GetHTML(url string) (string, error) {
-	resp, err := c.client.Get(url)
+func (c *Client) setHeaders(req *http.Request, opts *RequestOption) {
+	// 如果有临时请求头，只使用临时请求头
+	if opts != nil && opts.Headers != nil {
+		for k, v := range opts.Headers {
+			req.Header.Set(k, v)
+		}
+		return
+	}
+
+	// 如果没有临时请求头，使用默认请求头
+	for k, v := range c.defaultHeaders {
+		req.Header.Set(k, v)
+	}
+}
+
+func (c *Client) GetHTML(url string, opts *RequestOption) (string, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+	c.setHeaders(req, opts)
+
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -143,19 +176,103 @@ func (c *Client) GetHTML(url string) (string, error) {
 	return string(body), nil
 }
 
-func (c *Client) DownloadFile(url string, filepath string) error {
-	resp, err := c.client.Get(url)
+func (c *Client) DownloadFile(url string, filepath string, opts *RequestOption) error {
+	if err := os.MkdirAll(path.Dir(filepath), 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// 获取文件信息用于断点续传
+	var startPos int64 = 0
+	fi, err := os.Stat(filepath)
+	if err == nil {
+		startPos = fi.Size()
+	}
+
+	// 创建请求
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	c.setHeaders(req, opts)
+
+	// 设置断点续传
+	if startPos > 0 {
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", startPos))
+	}
+
+	// 发送请求
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	file, err := os.Create(filepath)
+	// 检查响应状态
+	switch resp.StatusCode {
+	case http.StatusOK:
+		// 服务器不支持断点续传，需要重新下载
+		startPos = 0
+	case http.StatusPartialContent:
+		// 服务器支持断点续传
+	default:
+		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	// 获取文件总大小
+	contentLength := resp.ContentLength
+	if contentLength <= 0 {
+		return fmt.Errorf("invalid content length: %d", contentLength)
+	}
+	totalSize := startPos + contentLength
+
+	// 打开或创建文件
+	flags := os.O_CREATE | os.O_WRONLY
+	if startPos > 0 {
+		flags |= os.O_APPEND
+	}
+	file, err := os.OpenFile(filepath, flags, 0644)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to open file: %w", err)
 	}
 	defer file.Close()
 
-	_, err = io.Copy(file, resp.Body)
-	return err
+	// 创建进度条，降低刷新频率
+	bar := progressbar.NewOptions64(
+		totalSize,
+		progressbar.OptionSetDescription("downloading"),
+		progressbar.OptionSetWriter(os.Stderr),
+		progressbar.OptionShowBytes(true),
+		progressbar.OptionThrottle(65*time.Millisecond), // 降低刷新频率
+		progressbar.OptionShowCount(),
+		progressbar.OptionSetWidth(15),
+		progressbar.OptionSetRenderBlankState(true),
+	)
+
+	// 设置断点续传的进度
+	if startPos > 0 {
+		bar.Add64(startPos)
+	}
+
+	// 使用缓冲读取提高性能
+	bufSize := 32 * 1024 // 32KB buffer
+	buf := make([]byte, bufSize)
+	for {
+		n, err := resp.Body.Read(buf)
+		if n > 0 {
+			// 写入文件
+			if _, werr := file.Write(buf[:n]); werr != nil {
+				return fmt.Errorf("failed to write to file: %w", werr)
+			}
+			// 更新进度条
+			bar.Add(n)
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("failed to read response: %w", err)
+		}
+	}
+
+	return nil
 }

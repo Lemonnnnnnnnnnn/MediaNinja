@@ -1,6 +1,7 @@
 package parsers
 
 import (
+	"media-crawler/core/request"
 	"net/url"
 	"strings"
 )
@@ -28,20 +29,43 @@ type ParseResult struct {
 	Extra   map[string]interface{} `json:"extra,omitempty"`
 }
 
+// DefaultDownloader 提供默认的下载实现
+type DefaultDownloader struct{}
+
+// Download 默认的下载实现
+func (d *DefaultDownloader) Download(client *request.Client, url string, filepath string) error {
+	return client.DownloadFile(url, filepath, nil)
+}
+
 // Parser 定义解析器接口
 type Parser interface {
 	Parse(html string) (*ParseResult, error)
+	GetDownloader() Downloader // 新增获取下载器的方法
+}
+
+// Downloader 定义下载器接口
+type Downloader interface {
+	Download(client *request.Client, url string, filepath string) error
 }
 
 func GetParser(url string) Parser {
-	// 根据URL返回对应的解析器
-	if strings.Contains(url, "telegra.ph") {
+	switch {
+	case strings.Contains(url, "telegra.ph"):
 		return &TelegraphParser{}
+	case strings.Contains(url, "ddys"):
+		return &DDYSParser{}
+	default:
+		return &DefaultParser{}
 	}
-	return &DefaultParser{}
 }
 
-type DefaultParser struct{}
+type DefaultParser struct {
+	DefaultDownloader
+}
+
+func (p *DefaultParser) GetDownloader() Downloader {
+	return p
+}
 
 func (p *DefaultParser) Parse(html string) (*ParseResult, error) {
 	// 实现默认的解析逻辑
