@@ -120,7 +120,6 @@ func (p *NTDMParser) parseVideoInfo(html string) (string, error) {
 	}
 
 	videoScript := doc.Find("#ageframediv > script:nth-child(1)").Text()
-	log.Printf("Found video script: %s", truncateString(videoScript, 100))
 
 	re := regexp.MustCompile(`player_aaaa=(.*)`)
 	matches := re.FindStringSubmatch(videoScript)
@@ -153,7 +152,6 @@ func (p *NTDMParser) parseYhdmURL(url string) (string, error) {
 
 	btToken := p.parseBtToken(html)
 	key := p.parseEncodedKey(html)
-	log.Printf("Found btToken: %s, key length: %d", truncateString(btToken, 10), len(key))
 
 	if btToken == "" || key == "" {
 		return "", fmt.Errorf("missing decryption information")
