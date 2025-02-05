@@ -209,93 +209,132 @@ func (c *Client) GetHTML(url string, opts *RequestOption) (string, error) {
 	return string(body), nil
 }
 
+// 添加重试相关的常量
+const (
+	maxRetries = 3
+	retryDelay = 5 * time.Second
+)
+
 func (c *Client) DownloadFile(url string, filepath string, opts *RequestOption) error {
 	if err := os.MkdirAll(path.Dir(filepath), 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	// 获取文件信息用于断点续传
-	var startPos int64 = 0
-	fi, err := os.Stat(filepath)
-	if err == nil {
-		startPos = fi.Size()
-	}
-
-	// 创建请求
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	c.setHeaders(req, opts)
-
-	// 设置断点续传
-	if startPos > 0 {
-		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", startPos))
-	}
-
-	// 发送请求
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// 检查响应状态
-	switch resp.StatusCode {
-	case http.StatusOK:
-		// 服务器不支持断点续传，需要重新下载
-		startPos = 0
-	case http.StatusPartialContent:
-		// 服务器支持断点续传
-	default:
-		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	// 获取文件总大小
-	contentLength := resp.ContentLength
-	if contentLength <= 0 {
-		return fmt.Errorf("invalid content length: %d", contentLength)
-	}
-	totalSize := startPos + contentLength
-
-	// 打开或创建文件
-	flags := os.O_CREATE | os.O_WRONLY
-	if startPos > 0 {
-		flags |= os.O_APPEND
-	}
-	file, err := os.OpenFile(filepath, flags, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to open file: %w", err)
-	}
-	defer file.Close()
-
-	// 创建进度跟踪器
-	progress := NewDownloadProgress(path.Base(filepath), totalSize, startPos)
-
-	// 使用缓冲读取提高性能
-	bufSize := 32 * 1024 // 32KB buffer
-	buf := make([]byte, bufSize)
-
-	for {
-		n, err := resp.Body.Read(buf)
-		if n > 0 {
-			// 写入文件
-			if _, werr := file.Write(buf[:n]); werr != nil {
-				progress.Fail(werr)
-				return fmt.Errorf("failed to write to file: %w", werr)
-			}
-
-			progress.Update(int64(n))
+	var attempt int
+	for attempt = 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			// 重试前等待一段时间
+			time.Sleep(retryDelay)
 		}
-		if err == io.EOF {
-			progress.Success()
-			break
+
+		// 获取文件信息用于断点续传
+		var startPos int64 = 0
+		fi, err := os.Stat(filepath)
+		if err == nil {
+			startPos = fi.Size()
 		}
+
+		// 创建请求
+		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {
-			progress.Fail(err)
-			return fmt.Errorf("failed to read response: %w", err)
+			return fmt.Errorf("failed to create request: %w", err)
+		}
+		c.setHeaders(req, opts)
+
+		// 设置断点续传
+		if startPos > 0 {
+			req.Header.Set("Range", fmt.Sprintf("bytes=%d-", startPos))
+		}
+
+		// 发送请求
+		resp, err := c.client.Do(req)
+		if err != nil {
+			if attempt < maxRetries-1 {
+				fmt.Printf("Download attempt %d failed: %v, retrying...\n", attempt+1, err)
+				continue
+			}
+			return fmt.Errorf("failed to send request after %d attempts: %w", maxRetries, err)
+		}
+		defer resp.Body.Close()
+
+		// 检查响应状态
+		switch resp.StatusCode {
+		case http.StatusOK:
+			startPos = 0
+		case http.StatusPartialContent:
+			// 服务器支持断点续传
+		default:
+			if attempt < maxRetries-1 {
+				fmt.Printf("Download attempt %d failed with status code %d, retrying...\n", attempt+1, resp.StatusCode)
+				continue
+			}
+			return fmt.Errorf("unexpected status code after %d attempts: %d", maxRetries, resp.StatusCode)
+		}
+
+		// 获取文件总大小
+		contentLength := resp.ContentLength
+		if contentLength <= 0 {
+			if attempt < maxRetries-1 {
+				fmt.Printf("Download attempt %d failed: invalid content length, retrying...\n", attempt+1)
+				continue
+			}
+			return fmt.Errorf("invalid content length: %d", contentLength)
+		}
+		totalSize := startPos + contentLength
+
+		// 打开或创建文件
+		flags := os.O_CREATE | os.O_WRONLY
+		if startPos > 0 {
+			flags |= os.O_APPEND
+		}
+		file, err := os.OpenFile(filepath, flags, 0644)
+		if err != nil {
+			return fmt.Errorf("failed to open file: %w", err)
+		}
+		defer file.Close()
+
+		// 创建进度跟踪器
+		progress := NewDownloadProgress(path.Base(filepath), totalSize, startPos)
+
+		// 使用缓冲读取提高性能
+		bufSize := 32 * 1024 // 32KB buffer
+		buf := make([]byte, bufSize)
+
+		downloadSuccess := true
+		for {
+			n, err := resp.Body.Read(buf)
+			if n > 0 {
+				// 写入文件
+				if _, werr := file.Write(buf[:n]); werr != nil {
+					progress.Fail(werr)
+					downloadSuccess = false
+					if attempt < maxRetries-1 {
+						fmt.Printf("Download attempt %d failed while writing: %v, retrying...\n", attempt+1, werr)
+						break
+					}
+					return fmt.Errorf("failed to write to file: %w", werr)
+				}
+				progress.Update(int64(n))
+			}
+			if err == io.EOF {
+				progress.Success()
+				return nil // 下载成功，直接返回
+			}
+			if err != nil {
+				progress.Fail(err)
+				downloadSuccess = false
+				if attempt < maxRetries-1 {
+					fmt.Printf("Download attempt %d failed while reading: %v, retrying...\n", attempt+1, err)
+					break
+				}
+				return fmt.Errorf("failed to read response: %w", err)
+			}
+		}
+
+		if downloadSuccess {
+			return nil
 		}
 	}
 
-	return nil
+	return fmt.Errorf("download failed after %d attempts", maxRetries)
 }
