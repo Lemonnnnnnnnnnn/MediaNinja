@@ -2,6 +2,7 @@ package request
 
 import (
 	"sync"
+	"time"
 
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
@@ -23,7 +24,7 @@ type ProgressManager struct {
 func GetProgressManager() *ProgressManager {
 	once.Do(func() {
 		progressManager = &ProgressManager{
-			progress: mpb.New(mpb.WithWidth(60)),
+			progress: mpb.New(mpb.WithWidth(60), mpb.WithRefreshRate(1*time.Second)),
 			tasks:    make(map[string]*DownloadProgress),
 		}
 	})
@@ -31,9 +32,11 @@ func GetProgressManager() *ProgressManager {
 }
 
 type DownloadProgress struct {
-	fileName  string
-	bar       *mpb.Bar
-	totalSize int64
+	fileName    string
+	bar         *mpb.Bar
+	totalSize   int64
+	startTime   time.Time
+	elapsedTime time.Duration
 }
 
 func NewDownloadProgress(fileName string, totalSize, startPos int64) *DownloadProgress {
@@ -43,11 +46,12 @@ func NewDownloadProgress(fileName string, totalSize, startPos int64) *DownloadPr
 	bar := manager.progress.AddBar(totalSize,
 		mpb.PrependDecorators(
 			decor.Name(fileName, decor.WC{W: len(fileName) + 1, C: decor.DindentRight}),
-			decor.CountersKiloByte("%.1f / %.1f", decor.WC{W: 30}),
+			decor.CountersKiloByte("%.1f / %.1f", decor.WC{W: 20}),
 		),
 		mpb.AppendDecorators(
 			decor.Percentage(decor.WC{W: 5}),
-			decor.AverageSpeed(decor.SizeB1024(0), "% .2f"),
+			decor.Name("] ", decor.WC{W: 1}),
+			decor.EwmaSpeed(decor.SizeB1024(0), "% .2f", 30, decor.WCSyncSpace),
 		),
 	)
 
@@ -57,9 +61,11 @@ func NewDownloadProgress(fileName string, totalSize, startPos int64) *DownloadPr
 	}
 
 	dp := &DownloadProgress{
-		fileName:  fileName,
-		bar:       bar,
-		totalSize: totalSize,
+		fileName:    fileName,
+		bar:         bar,
+		totalSize:   totalSize,
+		startTime:   time.Now(),
+		elapsedTime: 0,
 	}
 
 	manager.mutex.Lock()
@@ -70,7 +76,8 @@ func NewDownloadProgress(fileName string, totalSize, startPos int64) *DownloadPr
 }
 
 func (dp *DownloadProgress) Update(n int64) {
-	dp.bar.IncrBy(int(n))
+	dp.bar.EwmaIncrBy(int(n), time.Since(dp.startTime)-dp.elapsedTime)
+	dp.elapsedTime = time.Since(dp.startTime)
 }
 
 func (dp *DownloadProgress) Success() {
