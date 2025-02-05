@@ -65,37 +65,71 @@ func (*uTransport) newSpec() *tls.ClientHelloSpec {
 
 func (u *uTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if req.URL.Scheme == "http" {
+		// 对于 http 请求，直接使用普通 RoundTrip 处理
 		return u.tr1.RoundTrip(req)
 	} else if req.URL.Scheme != "https" {
 		return nil, fmt.Errorf("unsupported scheme: %s", req.URL.Scheme)
 	}
 
-	port := req.URL.Port()
-	if port == "" {
-		port = "443"
-	}
-
-	conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%s", req.URL.Hostname(), port), 10*time.Second)
+	// 从 transport 配置中获取代理地址
+	proxyURL, err := u.tr1.Proxy(req)
 	if err != nil {
-		return nil, fmt.Errorf("net.DialTimeout error: %+v", err)
+		return nil, fmt.Errorf("failed to get proxy URL: %v", err)
+	}
+	if proxyURL == nil {
+		return nil, fmt.Errorf("proxy URL is not configured")
 	}
 
-	uConn := tls.UClient(conn, &tls.Config{ServerName: req.URL.Hostname()}, tls.HelloCustom)
-	if err = uConn.ApplyPreset(u.newSpec()); err != nil {
+	// 连接到 HTTP 代理
+	conn, err := net.DialTimeout("tcp", proxyURL.Host, 10*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to proxy: %v", err)
+	}
+
+	// 发送 CONNECT 请求
+	dest := req.URL.Host
+	if req.URL.Port() == "" {
+		dest += ":443"
+	}
+	connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n", dest, req.URL.Host)
+	_, err = conn.Write([]byte(connectReq))
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to send CONNECT request: %v", err)
+	}
+
+	// 读取代理响应
+	respReader := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(respReader, req)
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to read proxy response: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		conn.Close()
+		return nil, fmt.Errorf("proxy CONNECT failed with status: %s", resp.Status)
+	}
+
+	// 代理建立了隧道，创建 TLS 连接
+	tlsConn := tls.UClient(conn, &tls.Config{ServerName: req.URL.Hostname()}, tls.HelloCustom)
+	if err = tlsConn.ApplyPreset(u.newSpec()); err != nil {
+		tlsConn.Close()
 		return nil, fmt.Errorf("uConn.ApplyPreset() error: %+v", err)
 	}
-	if err = uConn.Handshake(); err != nil {
-		return nil, fmt.Errorf("uConn.Handshake() error: %+v", err)
+	if err = tlsConn.Handshake(); err != nil {
+		tlsConn.Close()
+		return nil, fmt.Errorf("TLS handshake failed: %+v", err)
 	}
 
-	alpn := uConn.ConnectionState().NegotiatedProtocol
+	// 处理 ALPN (HTTP/2 或 HTTP/1.1)
+	alpn := tlsConn.ConnectionState().NegotiatedProtocol
 	switch alpn {
 	case "h2":
 		req.Proto = "HTTP/2.0"
 		req.ProtoMajor = 2
 		req.ProtoMinor = 0
 
-		if c, err := u.tr2.NewClientConn(uConn); err == nil {
+		if c, err := u.tr2.NewClientConn(tlsConn); err == nil {
 			return c.RoundTrip(req)
 		} else {
 			return nil, fmt.Errorf("http2.Transport.NewClientConn() error: %+v", err)
@@ -106,8 +140,8 @@ func (u *uTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		req.ProtoMajor = 1
 		req.ProtoMinor = 1
 
-		if err := req.Write(uConn); err == nil {
-			return http.ReadResponse(bufio.NewReader(uConn), req)
+		if err := req.Write(tlsConn); err == nil {
+			return http.ReadResponse(bufio.NewReader(tlsConn), req)
 		} else {
 			return nil, fmt.Errorf("http.Request.Write() error: %+v", err)
 		}
