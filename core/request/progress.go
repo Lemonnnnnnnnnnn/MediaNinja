@@ -32,11 +32,10 @@ func GetProgressManager() *ProgressManager {
 }
 
 type DownloadProgress struct {
-	fileName    string
-	bar         *mpb.Bar
-	totalSize   int64
-	startTime   time.Time
-	elapsedTime time.Duration
+	fileName   string
+	bar        *mpb.Bar
+	totalSize  int64
+	lastUpdate time.Time
 }
 
 func NewDownloadProgress(fileName string, totalSize, startPos int64) *DownloadProgress {
@@ -61,11 +60,10 @@ func NewDownloadProgress(fileName string, totalSize, startPos int64) *DownloadPr
 	}
 
 	dp := &DownloadProgress{
-		fileName:    fileName,
-		bar:         bar,
-		totalSize:   totalSize,
-		startTime:   time.Now(),
-		elapsedTime: 0,
+		fileName:   fileName,
+		bar:        bar,
+		totalSize:  totalSize,
+		lastUpdate: time.Now(),
 	}
 
 	manager.mutex.Lock()
@@ -76,8 +74,8 @@ func NewDownloadProgress(fileName string, totalSize, startPos int64) *DownloadPr
 }
 
 func (dp *DownloadProgress) Update(n int64) {
-	dp.bar.EwmaIncrBy(int(n), time.Since(dp.startTime)-dp.elapsedTime)
-	dp.elapsedTime = time.Since(dp.startTime)
+	dp.bar.EwmaIncrBy(int(n), time.Since(dp.lastUpdate))
+	dp.lastUpdate = time.Now()
 }
 
 func (dp *DownloadProgress) Success() {
