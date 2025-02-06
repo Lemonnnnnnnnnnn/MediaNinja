@@ -23,6 +23,8 @@ type Client struct {
 	client         *http.Client
 	proxy          string
 	defaultHeaders map[string]string
+	maxRetries     int
+	retryDelay     time.Duration
 }
 
 type uTransport struct {
@@ -151,7 +153,7 @@ func (u *uTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 }
 
-func NewClient(proxyURL string) *Client {
+func NewClient(proxyURL string, maxRetries int, retryDelay int) *Client {
 	transport := &uTransport{
 		tr1: &http.Transport{},
 		tr2: &http2.Transport{},
@@ -170,6 +172,8 @@ func NewClient(proxyURL string) *Client {
 			"accept-language": "en,zh-CN;q=0.9,zh;q=0.8",
 			"user-agent":      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/112.0.0.0 Safari/537.36",
 		},
+		maxRetries: maxRetries,
+		retryDelay: time.Duration(retryDelay) * time.Second,
 	}
 }
 
@@ -209,22 +213,16 @@ func (c *Client) GetHTML(url string, opts *RequestOption) (string, error) {
 	return string(body), nil
 }
 
-// 添加重试相关的常量
-const (
-	maxRetries = 3
-	retryDelay = 5 * time.Second
-)
-
 func (c *Client) DownloadFile(url string, filepath string, opts *RequestOption) error {
 	if err := os.MkdirAll(path.Dir(filepath), 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
 	var attempt int
-	for attempt = 0; attempt < maxRetries; attempt++ {
+	for attempt = 0; attempt < c.maxRetries; attempt++ {
 		if attempt > 0 {
 			// 重试前等待一段时间
-			time.Sleep(retryDelay)
+			time.Sleep(c.retryDelay)
 		}
 
 		// 获取文件信息用于断点续传
@@ -249,11 +247,11 @@ func (c *Client) DownloadFile(url string, filepath string, opts *RequestOption) 
 		// 发送请求
 		resp, err := c.client.Do(req)
 		if err != nil {
-			if attempt < maxRetries-1 {
+			if attempt < c.maxRetries-1 {
 				fmt.Printf("Download attempt %d failed: %v, retrying...\n", attempt+1, err)
 				continue
 			}
-			return fmt.Errorf("failed to send request after %d attempts: %w", maxRetries, err)
+			return fmt.Errorf("failed to send request after %d attempts: %w", c.maxRetries, err)
 		}
 		defer resp.Body.Close()
 
@@ -264,17 +262,17 @@ func (c *Client) DownloadFile(url string, filepath string, opts *RequestOption) 
 		case http.StatusPartialContent:
 			// 服务器支持断点续传
 		default:
-			if attempt < maxRetries-1 {
+			if attempt < c.maxRetries-1 {
 				fmt.Printf("Download attempt %d failed with status code %d, retrying...\n", attempt+1, resp.StatusCode)
 				continue
 			}
-			return fmt.Errorf("unexpected status code after %d attempts: %d", maxRetries, resp.StatusCode)
+			return fmt.Errorf("unexpected status code after %d attempts: %d", c.maxRetries, resp.StatusCode)
 		}
 
 		// 获取文件总大小
 		contentLength := resp.ContentLength
 		if contentLength <= 0 {
-			if attempt < maxRetries-1 {
+			if attempt < c.maxRetries-1 {
 				fmt.Printf("Download attempt %d failed: invalid content length, retrying...\n", attempt+1)
 				continue
 			}
@@ -308,7 +306,7 @@ func (c *Client) DownloadFile(url string, filepath string, opts *RequestOption) 
 				if _, werr := file.Write(buf[:n]); werr != nil {
 					progress.Fail(werr)
 					downloadSuccess = false
-					if attempt < maxRetries-1 {
+					if attempt < c.maxRetries-1 {
 						fmt.Printf("Download attempt %d failed while writing: %v, retrying...\n", attempt+1, werr)
 						break
 					}
@@ -323,7 +321,7 @@ func (c *Client) DownloadFile(url string, filepath string, opts *RequestOption) 
 			if err != nil {
 				progress.Fail(err)
 				downloadSuccess = false
-				if attempt < maxRetries-1 {
+				if attempt < c.maxRetries-1 {
 					fmt.Printf("Download attempt %d failed while reading: %v, retrying...\n", attempt+1, err)
 					break
 				}
@@ -336,5 +334,5 @@ func (c *Client) DownloadFile(url string, filepath string, opts *RequestOption) 
 		}
 	}
 
-	return fmt.Errorf("download failed after %d attempts", maxRetries)
+	return fmt.Errorf("download failed after %d attempts", c.maxRetries)
 }

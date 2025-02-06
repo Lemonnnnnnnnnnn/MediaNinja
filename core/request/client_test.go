@@ -6,7 +6,7 @@ import (
 
 func TestClientProxy(t *testing.T) {
 	proxyURL := "http://127.0.0.1:7890"
-	client := NewClient(proxyURL)
+	client := NewClient(proxyURL, 3, 5)
 
 	tests := []struct {
 		name    string

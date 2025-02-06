@@ -34,7 +34,7 @@ type CrawlMetadata struct {
 
 func NewCrawler(cfg *config.Config) *Crawler {
 	return &Crawler{
-		client:    request.NewClient(cfg.ProxyURL),
+		client:    request.NewClient(cfg.ProxyURL, cfg.MaxRetries, cfg.RetryDelay),
 		limiter:   concurrent.NewLimiter(cfg.Concurrency),
 		outputDir: cfg.OutputDir,
 		config:    cfg,

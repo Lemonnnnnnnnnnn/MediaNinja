@@ -63,4 +63,8 @@ func init() {
 	rootCmd.Flags().StringVarP(&cfg.ProxyURL, "proxy", "p", "", "Proxy URL (optional)")
 	rootCmd.Flags().IntVarP(&cfg.Concurrency, "concurrency", "c", 5, "Number of concurrent downloads")
 	rootCmd.Flags().StringVarP(&cfg.OutputDir, "output", "o", "downloads", "Output directory for downloaded files")
+
+	// Add new flags for retry configuration
+	rootCmd.Flags().IntVarP(&cfg.MaxRetries, "max-retries", "r", 3, "Maximum number of retry attempts for downloads")
+	rootCmd.Flags().IntVarP(&cfg.RetryDelay, "retry-delay", "d", 5, "Delay between retry attempts in seconds")
 }
