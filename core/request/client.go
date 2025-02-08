@@ -261,6 +261,9 @@ func (c *Client) DownloadFile(url string, filepath string, opts *RequestOption) 
 			startPos = 0
 		case http.StatusPartialContent:
 			// 服务器支持断点续传
+		case http.StatusRequestedRangeNotSatisfiable: // 416 错误码
+			// 文件已经完全下载，直接返回成功
+			return nil
 		default:
 			if attempt < c.maxRetries-1 {
 				fmt.Printf("Download attempt %d failed with status code %d, retrying...\n", attempt+1, resp.StatusCode)
