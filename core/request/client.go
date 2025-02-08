@@ -192,14 +192,31 @@ func (c *Client) setHeaders(req *http.Request, opts *RequestOption) {
 	}
 }
 
-func (c *Client) GetHTML(url string, opts *RequestOption) (string, error) {
-	req, err := http.NewRequest("GET", url, nil)
+// GetStream 执行请求并返回响应流，需要调用者负责关闭响应体
+func (c *Client) GetStream(method, url string, opts *RequestOption, headers map[string]string) (*http.Response, error) {
+	req, err := http.NewRequest(method, url, nil)
 	if err != nil {
-		return "", err
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
+
 	c.setHeaders(req, opts)
 
+	// 设置额外的请求头
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+
 	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+
+	return resp, nil
+}
+
+// Get 方法重构
+func (c *Client) Get(url string, opts *RequestOption) (string, error) {
+	resp, err := c.GetStream("GET", url, opts, nil)
 	if err != nil {
 		return "", err
 	}
@@ -213,6 +230,7 @@ func (c *Client) GetHTML(url string, opts *RequestOption) (string, error) {
 	return string(body), nil
 }
 
+// DownloadFile 方法重构
 func (c *Client) DownloadFile(url string, filepath string, opts *RequestOption) error {
 	if err := os.MkdirAll(path.Dir(filepath), 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
@@ -221,7 +239,6 @@ func (c *Client) DownloadFile(url string, filepath string, opts *RequestOption) 
 	var attempt int
 	for attempt = 0; attempt < c.maxRetries; attempt++ {
 		if attempt > 0 {
-			// 重试前等待一段时间
 			time.Sleep(c.retryDelay)
 		}
 
@@ -232,20 +249,16 @@ func (c *Client) DownloadFile(url string, filepath string, opts *RequestOption) 
 			startPos = fi.Size()
 		}
 
-		// 创建请求
-		req, err := http.NewRequest("GET", url, nil)
-		if err != nil {
-			return fmt.Errorf("failed to create request: %w", err)
-		}
-		c.setHeaders(req, opts)
-
-		// 设置断点续传
+		// 准备请求头
+		var headers map[string]string
 		if startPos > 0 {
-			req.Header.Set("Range", fmt.Sprintf("bytes=%d-", startPos))
+			headers = map[string]string{
+				"Range": fmt.Sprintf("bytes=%d-", startPos),
+			}
 		}
 
-		// 发送请求
-		resp, err := c.client.Do(req)
+		// 使用 getStream 获取响应
+		resp, err := c.GetStream("GET", url, opts, headers)
 		if err != nil {
 			if attempt < c.maxRetries-1 {
 				fmt.Printf("Download attempt %d failed: %v, retrying...\n", attempt+1, err)
@@ -261,8 +274,7 @@ func (c *Client) DownloadFile(url string, filepath string, opts *RequestOption) 
 			startPos = 0
 		case http.StatusPartialContent:
 			// 服务器支持断点续传
-		case http.StatusRequestedRangeNotSatisfiable: // 416 错误码
-			// 文件已经完全下载，直接返回成功
+		case http.StatusRequestedRangeNotSatisfiable:
 			return nil
 		default:
 			if attempt < c.maxRetries-1 {

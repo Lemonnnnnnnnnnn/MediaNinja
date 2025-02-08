@@ -106,7 +106,7 @@ func (p *NTDMParser) parseEpisodeVideo(url string) (string, error) {
 	}
 
 	log.Printf("Fetching episode page: %s", url)
-	html, err := p.client.GetHTML(url, nil)
+	html, err := p.client.Get(url, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch episode page: %w", err)
 	}
@@ -145,7 +145,7 @@ func (p *NTDMParser) parseVideoInfo(html string) (string, error) {
 
 func (p *NTDMParser) parseYhdmURL(url string) (string, error) {
 	log.Printf("Fetching YHDM page: %s", url)
-	html, err := p.client.GetHTML(url, nil)
+	html, err := p.client.Get(url, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch yhdm page: %w", err)
 	}

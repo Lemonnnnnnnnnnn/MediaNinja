@@ -1,6 +1,7 @@
 package format
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 )
@@ -105,4 +106,19 @@ func GetFileExt(filename string) string {
 func SanitizeFileName(filename string) string {
 	// 实现文件名清理逻辑
 	return filename
+}
+
+// getFileName 生成文件名
+func GetFileName(urlPath string, index int) string {
+	// 尝试从URL路径中提取文件名
+	parts := strings.Split(urlPath, "/")
+	if len(parts) > 0 {
+		filename := parts[len(parts)-1]
+		if filename != "" {
+			return filename
+		}
+	}
+
+	// 如果无法从URL中提取文件名，则生成一个序号文件名
+	return fmt.Sprintf("%03d.mp4", index+1)
 }
