@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"media-crawler/core/request"
+	"media-crawler/core/request/client"
+	"media-crawler/core/request/downloader"
+	"media-crawler/core/request/types"
 	"media-crawler/utils/format"
 	"net/url"
 	"strings"
@@ -18,11 +20,11 @@ import (
 )
 
 type DDYSParser struct {
-	client     *request.Client
+	client     *client.Client
 	downloader DDYSDownloader
 }
 
-func NewDDYSParser(client *request.Client) *DDYSParser {
+func NewDDYSParser(client *client.Client) *DDYSParser {
 	if client == nil {
 		log.Printf("Warning: NTDMParser initialized with nil client")
 	}
@@ -129,8 +131,8 @@ func (p *DDYSParser) parseEpisodeVideo(html string) ([]string, []string, error) 
 	return urls, subtitleURLs, nil
 }
 
-func (d *DDYSDownloader) Download(client *request.Client, url string, filepath string) error {
-	opts := &request.RequestOption{
+func (d *DDYSDownloader) Download(client *client.Client, url string, filepath string) error {
+	opts := &types.RequestOption{
 		Headers: map[string]string{
 			"Accept":          "*/*",
 			"Accept-Encoding": "identity;q=1, *;q=0",
@@ -146,7 +148,7 @@ func (d *DDYSDownloader) Download(client *request.Client, url string, filepath s
 			"Origin":          "https://ddys.pro",
 		},
 	}
-	return client.DownloadFile(url, filepath, opts)
+	return downloader.NewDownloader(client, true).DownloadFile(url, filepath, opts)
 }
 
 func (p *DDYSParser) fetchSubtitleThenDecrypt(url string) (string, error) {

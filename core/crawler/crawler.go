@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"media-crawler/core/config"
 	"media-crawler/core/parsers"
-	"media-crawler/core/request"
+	"media-crawler/core/request/client"
 	"media-crawler/utils/concurrent"
 	"media-crawler/utils/format"
 	"media-crawler/utils/io"
@@ -15,7 +15,7 @@ import (
 )
 
 type Crawler struct {
-	client       *request.Client
+	client       *client.Client
 	parser       parsers.Parser
 	limiter      *concurrent.Limiter
 	outputDir    string
@@ -35,12 +35,13 @@ type CrawlMetadata struct {
 
 func NewCrawler(cfg *config.Config) *Crawler {
 	return &Crawler{
-		client:    request.NewClient(cfg.ProxyURL, cfg.MaxRetries, cfg.RetryDelay),
+		client:    client.NewClient(cfg.ProxyURL, cfg.MaxRetries, cfg.RetryDelay),
 		limiter:   concurrent.NewLimiter(cfg.Concurrency),
 		outputDir: cfg.OutputDir,
 		config:    cfg,
 		ioManager: io.NewManager(cfg.OutputDir),
 	}
+
 }
 
 func (c *Crawler) Start(url string) error {

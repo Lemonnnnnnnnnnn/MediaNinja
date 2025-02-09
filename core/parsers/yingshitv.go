@@ -4,18 +4,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"media-crawler/core/request"
-	"media-crawler/utils/format"
+	"media-crawler/core/request/client"
 	"net/url"
+	"strings"
 )
 
 type YingshitvParser struct {
-	client *request.Client
+	client *client.Client
 	DefaultDownloader
 	url string
 }
 
-func NewYingshitvParser(client *request.Client, url string) *YingshitvParser {
+func NewYingshitvParser(client *client.Client, url string) *YingshitvParser {
 	if client == nil {
 		log.Printf("Warning: YingshitvParser initialized with nil client")
 	}
@@ -24,14 +24,16 @@ func NewYingshitvParser(client *request.Client, url string) *YingshitvParser {
 		client: client,
 		url:    url,
 	}
-
 }
 
 func (p *YingshitvParser) Parse(_ string) (*ParseResult, error) {
+	log.Printf("Starting to parse URL: %s", p.url)
 	videoInfo, err := p.fetchVideoInfo()
 	if err != nil {
+		log.Printf("Error fetching video info: %v", err)
 		return nil, fmt.Errorf("failed to fetch video info: %w", err)
 	}
+	log.Printf("Successfully fetched video info for URL: %s", p.url)
 
 	result := &ParseResult{
 		Media: make([]MediaInfo, 0),
@@ -48,7 +50,7 @@ func (p *YingshitvParser) Parse(_ string) (*ParseResult, error) {
 		result.Media = append(result.Media, MediaInfo{
 			URL:       url,
 			MediaType: Video,
-			Filename:  format.GetFileName(episode.URL, i),
+			Filename:  fmt.Sprintf("第%d集", i+1),
 		})
 
 	}
@@ -63,16 +65,34 @@ type VideoMeta struct {
 }
 
 func (p *YingshitvParser) parseVideoMeta() (VideoMeta, error) {
-	// url like https://www.yingshi.tv/vod/play/id/10855/sid/1/nid/1 ， id = 10855, tid = 1, nid = 1
+	log.Printf("Parsing video meta from URL: %s", p.url)
 	videoURL, err := url.Parse(p.url)
 	if err != nil {
+		log.Printf("Error parsing URL %s: %v", p.url, err)
 		return VideoMeta{}, fmt.Errorf("failed to parse URL %s: %w", p.url, err)
 	}
 
-	queryParams := videoURL.Query()
-	id := queryParams.Get("id")
-	tid := queryParams.Get("sid")
-	nid := queryParams.Get("nid")
+	// 解析路径参数
+	pathSegments := strings.Split(videoURL.Path, "/")
+	var id, tid, nid string
+
+	// 遍历路径段查找参数
+	for i := 0; i < len(pathSegments); i++ {
+		switch pathSegments[i] {
+		case "id":
+			if i+1 < len(pathSegments) {
+				id = pathSegments[i+1]
+			}
+		case "sid":
+			if i+1 < len(pathSegments) {
+				tid = pathSegments[i+1]
+			}
+		case "nid":
+			if i+1 < len(pathSegments) {
+				nid = pathSegments[i+1]
+			}
+		}
+	}
 
 	return VideoMeta{
 		id:  id,
@@ -95,7 +115,7 @@ type VideoInfoResponse struct {
 	Code int `json:"code"`
 	Data struct {
 		VodSources []struct {
-			VodPlayList []struct {
+			VodPlayList struct {
 				UrlCount int `json:"url_count"`
 				Urls     []struct {
 					Name string `json:"name"`
@@ -108,15 +128,19 @@ type VideoInfoResponse struct {
 }
 
 func (p *YingshitvParser) fetchVideoInfo() (VideoInfo, error) {
+	log.Printf("Fetching video info for videoMeta: %v", p.url)
 	videoMeta, err := p.parseVideoMeta()
 	if err != nil {
+		log.Printf("Error parsing video meta: %v", err)
 		return VideoInfo{}, fmt.Errorf("failed to parse video meta: %w", err)
 	}
 
 	url := fmt.Sprintf("https://api.yingshi.tv/vod/v1/info?id=%s&tid=%s", videoMeta.id, videoMeta.tid)
+	log.Printf("Requesting video info from URL: %s", url)
 
 	var videoInfo VideoInfoResponse
 	resp, err := p.client.Get(url, nil)
+
 	if err != nil {
 		return VideoInfo{}, fmt.Errorf("failed to fetch video info: %w", err)
 	}
@@ -131,13 +155,11 @@ func (p *YingshitvParser) fetchVideoInfo() (VideoInfo, error) {
 
 	episodes := []VideoEpisode{}
 	for _, source := range videoInfo.Data.VodSources {
-		for _, episode := range source.VodPlayList {
-			for _, url := range episode.Urls {
-				episodes = append(episodes, VideoEpisode{
-					Title: url.Name,
-					URL:   url.Url,
-				})
-			}
+		for _, episode := range source.VodPlayList.Urls {
+			episodes = append(episodes, VideoEpisode{
+				Title: episode.Name,
+				URL:   episode.Url,
+			})
 		}
 	}
 

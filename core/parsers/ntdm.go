@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"media-crawler/core/request"
+	"media-crawler/core/request/client"
 	"net/url"
 	"regexp"
 	"strings"
@@ -18,11 +18,11 @@ import (
 const tokenKey = "57A891D97E332A9D"
 
 type NTDMParser struct {
-	client *request.Client
+	client *client.Client
 	DefaultDownloader
 }
 
-func NewNTDMParser(client *request.Client) *NTDMParser {
+func NewNTDMParser(client *client.Client) *NTDMParser {
 	if client == nil {
 		log.Printf("Warning: NTDMParser initialized with nil client")
 	}

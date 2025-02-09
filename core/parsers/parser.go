@@ -1,7 +1,8 @@
 package parsers
 
 import (
-	"media-crawler/core/request"
+	"media-crawler/core/request/client"
+	"media-crawler/core/request/downloader"
 	"net/url"
 	"strings"
 )
@@ -41,18 +42,18 @@ type Parser interface {
 }
 
 type Downloader interface {
-	Download(client *request.Client, url string, filepath string) error
+	Download(client *client.Client, url string, filepath string) error
 }
 
 // DefaultDownloader 提供默认的下载实现
 type DefaultDownloader struct{}
 
 // Download 默认的下载实现
-func (d *DefaultDownloader) Download(client *request.Client, url string, filepath string) error {
-	return client.DownloadFile(url, filepath, nil)
+func (d *DefaultDownloader) Download(client *client.Client, url string, filepath string) error {
+	return downloader.NewDownloader(client, true).DownloadFile(url, filepath, nil)
 }
 
-func GetParser(url string, client *request.Client) Parser {
+func GetParser(url string, client *client.Client) Parser {
 	switch {
 	case strings.Contains(url, "telegra.ph"):
 		return &TelegraphParser{}

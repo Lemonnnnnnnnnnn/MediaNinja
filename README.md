@@ -1,0 +1,6 @@
+## MediaNinja
+
+### pre-requisites
+
+- ffmpeg
+

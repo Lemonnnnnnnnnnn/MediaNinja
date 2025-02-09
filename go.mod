@@ -25,6 +25,7 @@ require (
 
 require (
 	github.com/PuerkitoBio/goquery v1.10.1
+	github.com/grafov/m3u8 v0.12.1
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/refraction-networking/utls v1.6.7
 	github.com/spf13/pflag v1.0.5 // indirect
