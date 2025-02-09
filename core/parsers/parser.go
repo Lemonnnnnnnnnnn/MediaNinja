@@ -60,6 +60,8 @@ func GetParser(url string, client *request.Client) Parser {
 		return NewDDYSParser(client)
 	case strings.Contains(url, "ntdm"):
 		return NewNTDMParser(client)
+	case strings.Contains(url, "yingshi.tv"):
+		return NewYingshitvParser(client, url)
 	default:
 		return &DefaultParser{}
 	}

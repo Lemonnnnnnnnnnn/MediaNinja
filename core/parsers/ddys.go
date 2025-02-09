@@ -234,6 +234,7 @@ func pkcs7Unpad(data []byte, blockSize int) ([]byte, error) {
 		return nil, fmt.Errorf("invalid padding size")
 	}
 
+	// 获取填充字节数
 	padding := int(data[length-1])
 	if padding < 1 || padding > blockSize {
 		return nil, fmt.Errorf("invalid padding")
