@@ -47,25 +47,62 @@ func (p *NTDMParser) Parse(html string) (*ParseResult, error) {
 		result.Title = &title
 	}
 
+	// 创建一个带缓冲的channel来接收处理结果
+	type episodeResult struct {
+		index     int
+		mediaInfo *MediaInfo
+		err       error
+	}
+	resultChan := make(chan episodeResult, len(urls))
+
+	// 启动goroutine处理每个episode
 	for i, episodeURL := range urls {
-		log.Printf("Processing episode %d: %s", i+1, episodeURL)
-		videoURL, err := p.parseEpisodeVideo(episodeURL)
-		if err != nil {
-			log.Printf("Failed to parse episode %d: %v", i+1, err)
-			continue
-		}
-		if videoURL != "" {
+		go func(idx int, u string) {
+			log.Printf("Processing episode %d: %s", idx+1, u)
+			videoURL, err := p.parseEpisodeVideo(u)
+			if err != nil {
+				resultChan <- episodeResult{idx, nil, err}
+				return
+			}
+
+			if videoURL == "" {
+				resultChan <- episodeResult{idx, nil, nil}
+				return
+			}
+
 			parsedURL, err := url.Parse(videoURL)
 			if err != nil {
-				log.Printf("Failed to parse URL %s: %v", videoURL, err)
-				continue
+				resultChan <- episodeResult{idx, nil, err}
+				return
 			}
-			result.Media = append(result.Media, MediaInfo{
+
+			mediaInfo := &MediaInfo{
 				URL:       parsedURL,
 				MediaType: Video,
-				Filename:  fmt.Sprintf("%s-%d.mp4", title, i+1),
-			})
-			log.Printf("Successfully added video %d: %s", i+1, videoURL)
+				Filename:  fmt.Sprintf("%s-%d.mp4", title, idx+1),
+			}
+			resultChan <- episodeResult{idx, mediaInfo, nil}
+		}(i, episodeURL)
+	}
+
+	// 收集所有结果
+	mediaInfos := make([]*MediaInfo, len(urls))
+	for range urls {
+		res := <-resultChan
+		if res.err != nil {
+			log.Printf("Failed to parse episode %d: %v", res.index+1, res.err)
+			continue
+		}
+		if res.mediaInfo != nil {
+			mediaInfos[res.index] = res.mediaInfo
+			log.Printf("Successfully added video %d: %s", res.index+1, res.mediaInfo.URL.String())
+		}
+	}
+
+	// 按顺序添加非空的MediaInfo到结果中
+	for _, info := range mediaInfos {
+		if info != nil {
+			result.Media = append(result.Media, *info)
 		}
 	}
 
