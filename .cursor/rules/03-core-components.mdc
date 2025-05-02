@@ -1,0 +1,39 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# MediaNinja 核心组件
+
+MediaNinja 由几个关键组件组成，各自负责特定功能。
+
+## 核心模块
+
+### 抓取器 (Crawler)
+
+位于 `core/crawler/` 目录，负责协调整个下载过程，是程序的核心部分。由 [cmd/root.go](mdc:cmd/root.go) 调用并启动。
+
+### 配置 (Config)
+
+位于 `core/config/` 目录，负责管理程序配置，定义了如下主要配置项：
+- URL：目标抓取链接
+- ProxyURL：代理服务器地址
+- Concurrency：并发下载数量
+- OutputDir：输出目录
+- MaxRetries：最大重试次数
+- RetryDelay：重试延迟时间
+
+### 解析器 (Parsers)
+
+位于 `core/parsers/` 目录，负责解析不同网站的内容格式，提取媒体链接。
+
+### 请求处理 (Request)
+
+位于 `core/request/` 目录，处理 HTTP 请求，支持代理和自定义头部等功能。
+
+## 工具模块
+
+- `utils/io/`：文件和输入输出操作
+- `utils/format/`：格式化工具
+- `utils/logger/`：日志记录工具
+- `utils/concurrent/`：并发控制和限流工具

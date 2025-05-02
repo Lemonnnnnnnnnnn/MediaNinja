@@ -1,0 +1,33 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# MediaNinja 项目概述
+
+MediaNinja 是一个用 Go 语言编写的媒体抓取工具，主要用于从网站下载媒体内容。
+
+## 项目结构
+
+- **入口点**: [main.go](mdc:main.go) - 程序的主入口，调用了 cmd 包中的 Execute 函数
+- **命令行界面**: [cmd/root.go](mdc:cmd/root.go) - 使用 Cobra 库实现的命令行界面
+- **核心功能**:
+  - `core/crawler/` - 媒体抓取的核心实现
+  - `core/parsers/` - 用于解析不同网站格式的解析器
+  - `core/request/` - 网络请求处理
+  - `core/config/` - 配置管理
+- **工具类**:
+  - `utils/` - 实用工具函数和辅助功能
+- **存储**:
+  - `stores/` - 存储相关功能和文件
+
+## 主要依赖
+
+- [Cobra](https://github.com/spf13/cobra) - 命令行界面
+- [Logrus](https://github.com/sirupsen/logrus) - 日志记录
+- [goquery](https://github.com/PuerkitoBio/goquery) - HTML 解析
+- [m3u8](https://github.com/grafov/m3u8) - 流媒体播放列表解析
+
+## 使用要求
+
+- 需要安装 ffmpeg

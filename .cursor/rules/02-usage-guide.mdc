@@ -1,0 +1,38 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# MediaNinja 使用指南
+
+MediaNinja 是一个命令行工具，用于抓取和下载媒体内容。
+
+## 基本用法
+
+```bash
+# 基本下载，指定目标 URL
+./media-crawler --url https://example.com/media-page
+
+# 使用代理
+./media-crawler --url https://example.com/media-page --proxy http://127.0.0.1:7890
+
+# 自定义输出目录
+./media-crawler --url https://example.com/media-page --output ./my-downloads
+
+# 设置并发下载数
+./media-crawler --url https://example.com/media-page --concurrency 10
+
+# 设置重试次数和延迟
+./media-crawler --url https://example.com/media-page --max-retries 5 --retry-delay 10
+```
+
+## 参数说明
+
+从 [cmd/root.go](mdc:cmd/root.go) 中提取的命令行参数：
+
+- `--url, -u` (必需): 要抓取的目标 URL
+- `--proxy, -p` (可选): 代理服务器 URL
+- `--concurrency, -c` (可选, 默认: 5): 并行下载数量
+- `--output, -o` (可选, 默认: "downloads"): 下载文件的输出目录
+- `--max-retries, -r` (可选, 默认: 3): 下载重试的最大次数
+- `--retry-delay, -d` (可选, 默认: 5): 重试之间的延迟（秒）
