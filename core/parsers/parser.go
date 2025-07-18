@@ -43,6 +43,7 @@ type Parser interface {
 
 type Downloader interface {
 	Download(client *client.Client, url string, filepath string) error
+	DownloadWithPrefix(client *client.Client, url string, filepath string, urlPrefix string) error
 }
 
 // DefaultDownloader 提供默认的下载实现
@@ -51,6 +52,11 @@ type DefaultDownloader struct{}
 // Download 默认的下载实现
 func (d *DefaultDownloader) Download(client *client.Client, url string, filepath string) error {
 	return downloader.NewDownloader(client, true).DownloadFile(url, filepath, nil)
+}
+
+// DownloadWithPrefix 带前缀的下载实现
+func (d *DefaultDownloader) DownloadWithPrefix(client *client.Client, url string, filepath string, urlPrefix string) error {
+	return downloader.NewDownloader(client, true).DownloadFileWithPrefix(url, filepath, nil, urlPrefix)
 }
 
 func GetParser(url string, client *client.Client) Parser {
@@ -63,6 +69,8 @@ func GetParser(url string, client *client.Client) Parser {
 		return NewNTDMParser(client)
 	case strings.Contains(url, "yingshi.tv"):
 		return NewYingshitvParser(client, url)
+	case strings.Contains(url, "pornhub.com"):
+		return NewPornhubParser(client)
 	default:
 		return &DefaultParser{}
 	}

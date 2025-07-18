@@ -151,6 +151,10 @@ func (d *DDYSDownloader) Download(client *client.Client, url string, filepath st
 	return downloader.NewDownloader(client, true).DownloadFile(url, filepath, opts)
 }
 
+func (d *DDYSDownloader) DownloadWithPrefix(client *client.Client, url string, filepath string, urlPrefix string) error {
+	return nil
+}
+
 func (p *DDYSParser) fetchSubtitleThenDecrypt(url string) (string, error) {
 	resp, err := p.client.GetStream("GET", url, nil, nil)
 	if err != nil {

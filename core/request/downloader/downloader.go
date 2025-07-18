@@ -39,10 +39,30 @@ func (d *Downloader) DownloadFile(url string, filepath string, opts *RequestOpti
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
+	fmt.Println("DownloadFile", url)
 	// 检查是否是 M3U8 文件
-	if strings.HasSuffix(strings.ToLower(url), ".m3u8") {
+	if strings.Contains(strings.ToLower(url), ".m3u8") {
+		fmt.Println("DownloadFile is M3U8")
 		// 使用新的 M3U8 下载器，传入 showProgress 参数
 		m3u8Downloader := NewM3U8Downloader(d.client, filepath, opts, d.showProgress)
+		return m3u8Downloader.DownloadFromURL(url)
+	}
+
+	return d.downloadRegularFile(url, filepath, opts)
+}
+
+// DownloadFileWithPrefix downloads a file from URL to the specified filepath with URL prefix support
+func (d *Downloader) DownloadFileWithPrefix(url string, filepath string, opts *RequestOption, urlPrefix string) error {
+	if err := os.MkdirAll(path.Dir(filepath), 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	fmt.Println("DownloadFileWithPrefix", url, "prefix:", urlPrefix)
+	// 检查是否是 M3U8 文件
+	if strings.Contains(strings.ToLower(url), ".m3u8") {
+		fmt.Println("DownloadFileWithPrefix is M3U8")
+		// 使用带前缀的 M3U8 下载器
+		m3u8Downloader := NewM3U8DownloaderWithPrefix(d.client, filepath, opts, d.showProgress, urlPrefix)
 		return m3u8Downloader.DownloadFromURL(url)
 	}
 

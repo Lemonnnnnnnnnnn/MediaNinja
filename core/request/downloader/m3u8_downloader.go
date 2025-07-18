@@ -18,6 +18,7 @@ type M3U8Downloader struct {
 	output       string
 	opts         *RequestOption
 	showProgress bool
+	urlPrefix    string // 添加 URL 前缀字段
 }
 
 // 用于保存下载进度的结构
@@ -32,6 +33,18 @@ func NewM3U8Downloader(client ClientInterface, output string, opts *RequestOptio
 		output:       output,
 		opts:         opts,
 		showProgress: showProgress,
+		urlPrefix:    "", // 默认为空
+	}
+}
+
+// NewM3U8DownloaderWithPrefix 创建带前缀的 M3U8 下载器
+func NewM3U8DownloaderWithPrefix(client ClientInterface, output string, opts *RequestOption, showProgress bool, urlPrefix string) *M3U8Downloader {
+	return &M3U8Downloader{
+		client:       client,
+		output:       output,
+		opts:         opts,
+		showProgress: showProgress,
+		urlPrefix:    urlPrefix,
 	}
 }
 
@@ -87,13 +100,16 @@ func (m *M3U8Downloader) downloadM3U8Content(m3u8URL string, outFile *os.File) e
 		return fmt.Errorf("failed to decode m3u8: %w", err)
 	}
 
+	log.Printf("listType: %+v", listType)
+
 	// 处理不同类型的播放列表
 	switch listType {
 	case m3u8.MEDIA:
 		mediapl := playlist.(*m3u8.MediaPlaylist)
 		return m.downloadSegments(mediapl, outFile)
 	case m3u8.MASTER:
-		return fmt.Errorf("master playlist not supported yet")
+		masterpl := playlist.(*m3u8.MasterPlaylist)
+		return m.handleMasterPlaylist(masterpl, m3u8URL, outFile)
 	default:
 		return fmt.Errorf("unknown playlist type")
 	}
@@ -134,8 +150,11 @@ func (m *M3U8Downloader) downloadSegments(playlist *m3u8.MediaPlaylist, outFile 
 			continue
 		}
 
+		// 构建完整的 segment URL
+		segmentURL := m.buildSegmentURL(segment.URI)
+
 		// 下载分片
-		resp, err := m.client.GetStream("GET", segment.URI, m.opts, nil)
+		resp, err := m.client.GetStream("GET", segmentURL, m.opts, nil)
 		if err != nil {
 			if progress != nil {
 				progress.Fail(err)
@@ -204,6 +223,95 @@ func (m *M3U8Downloader) convertToMP4(inputFile, outputFile string) error {
 
 	log.Printf("Successfully converted to MP4: %s", outputFile)
 	return nil
+}
+
+// handleMasterPlaylist 处理 master 播放列表，获取分片 m3u8 链接并继续下载
+func (m *M3U8Downloader) handleMasterPlaylist(masterPlaylist *m3u8.MasterPlaylist, masterURL string, outFile *os.File) error {
+	log.Printf("Processing master playlist with %d variants", len(masterPlaylist.Variants))
+
+	// 查找合适的变体（优先选择第一个可用的）
+	var selectedVariant *m3u8.Variant
+	for _, variant := range masterPlaylist.Variants {
+		if variant != nil && variant.URI != "" {
+			selectedVariant = variant
+			break
+		}
+	}
+
+	if selectedVariant == nil {
+		return fmt.Errorf("no valid variant found in master playlist")
+	}
+
+	log.Printf("Selected variant: %s", selectedVariant.URI)
+
+	// 构造分片 m3u8 URL
+	segmentURL, err := m.buildVariantURL(selectedVariant.URI, masterURL)
+	if err != nil {
+		return fmt.Errorf("failed to build segment URL: %w", err)
+	}
+
+	// 更新 URL 前缀以便后续分片下载使用
+	if m.urlPrefix == "" {
+		m.urlPrefix = m.extractURLPrefix(masterURL)
+		log.Printf("Extracted URL prefix: %s", m.urlPrefix)
+	}
+
+	log.Printf("Requesting segment m3u8 from: %s", segmentURL)
+
+	// 递归下载分片 m3u8
+	return m.downloadM3U8Content(segmentURL, outFile)
+}
+
+// buildVariantURL 根据 variant URI 和 master URL 构造完整的分片 URL
+func (m *M3U8Downloader) buildVariantURL(variantURI, masterURL string) (string, error) {
+	// 如果 variant URI 已经是完整的 URL，直接返回
+	if strings.HasPrefix(variantURI, "http://") || strings.HasPrefix(variantURI, "https://") {
+		return variantURI, nil
+	}
+
+	// 提取 master URL 的前缀
+	prefix := m.extractURLPrefix(masterURL)
+	if prefix == "" {
+		return "", fmt.Errorf("failed to extract URL prefix from: %s", masterURL)
+	}
+
+	// 组合前缀和 variant URI
+	prefix = strings.TrimSuffix(prefix, "/")
+	uri := strings.TrimPrefix(variantURI, "/")
+
+	return prefix + "/" + uri, nil
+}
+
+// extractURLPrefix 从 master URL 中提取前缀（去掉文件名部分）
+func (m *M3U8Downloader) extractURLPrefix(masterURL string) string {
+	// 查找最后一个 '/' 的位置
+	lastSlash := strings.LastIndex(masterURL, "/")
+	if lastSlash == -1 {
+		return masterURL
+	}
+
+	// 返回到最后一个 '/' 为止的部分
+	return masterURL[:lastSlash]
+}
+
+// buildSegmentURL 根据 segment URI 和 urlPrefix 构建完整的 URL
+func (m *M3U8Downloader) buildSegmentURL(segmentURI string) string {
+	// 如果 segment URI 已经是完整的 URL，直接返回
+	if strings.HasPrefix(segmentURI, "http://") || strings.HasPrefix(segmentURI, "https://") {
+		return segmentURI
+	}
+
+	// 如果没有设置前缀，直接返回原始 URI
+	if m.urlPrefix == "" {
+		return segmentURI
+	}
+
+	// 组合前缀和 segment URI
+	// 确保前缀末尾没有 "/" 且 segmentURI 开头没有 "/"
+	prefix := strings.TrimSuffix(m.urlPrefix, "/")
+	uri := strings.TrimPrefix(segmentURI, "/")
+
+	return prefix + "/" + uri
 }
 
 func (m *M3U8Downloader) getStateFilePath() string {
