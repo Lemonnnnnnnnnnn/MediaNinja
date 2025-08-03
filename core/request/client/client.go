@@ -3,7 +3,7 @@ package client
 import (
 	"fmt"
 	"io"
-	"media-crawler/core/request/types"
+	"MediaNinja/core/request/types"
 	"net/http"
 	"net/url"
 	"time"

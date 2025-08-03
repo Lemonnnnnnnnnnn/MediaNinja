@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"media-crawler/core/request/client"
+	"MediaNinja/core/request/client"
 	"net/url"
 	"strings"
 )

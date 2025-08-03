@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"media-crawler/core/config"
-	"media-crawler/core/crawler"
+	"MediaNinja/core/config"
+	"MediaNinja/core/crawler"
 
 	"github.com/spf13/cobra"
 )
@@ -16,7 +16,7 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "media-crawler",
+	Use:   "MediaNinja",
 	Short: "A media crawler for websites",
 	PreRun: func(cmd *cobra.Command, args []string) {
 		// 确保输出目录存在

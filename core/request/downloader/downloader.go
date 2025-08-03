@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"media-crawler/core/request/types"
+	"MediaNinja/core/request/types"
 )
 
 type RequestOption = types.RequestOption

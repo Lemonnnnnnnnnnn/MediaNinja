@@ -1,4 +1,4 @@
-module media-crawler
+module MediaNinja
 
 go 1.23
 

@@ -2,7 +2,7 @@ package io
 
 import (
 	"fmt"
-	"media-crawler/utils/format"
+	"MediaNinja/utils/format"
 	"os"
 	"path/filepath"
 )

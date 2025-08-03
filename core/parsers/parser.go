@@ -1,8 +1,8 @@
 package parsers
 
 import (
-	"media-crawler/core/request/client"
-	"media-crawler/core/request/downloader"
+	"MediaNinja/core/request/client"
+	"MediaNinja/core/request/downloader"
 	"net/url"
 	"strings"
 )

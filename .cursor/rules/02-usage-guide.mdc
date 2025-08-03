@@ -11,19 +11,19 @@ MediaNinja 是一个命令行工具，用于抓取和下载媒体内容。
 
 ```bash
 # 基本下载，指定目标 URL
-./media-crawler --url https://example.com/media-page
+./MediaNinja --url https://example.com/media-page
 
 # 使用代理
-./media-crawler --url https://example.com/media-page --proxy http://127.0.0.1:7890
+./MediaNinja --url https://example.com/media-page --proxy http://127.0.0.1:7890
 
 # 自定义输出目录
-./media-crawler --url https://example.com/media-page --output ./my-downloads
+./MediaNinja --url https://example.com/media-page --output ./my-downloads
 
 # 设置并发下载数
-./media-crawler --url https://example.com/media-page --concurrency 10
+./MediaNinja --url https://example.com/media-page --concurrency 10
 
 # 设置重试次数和延迟
-./media-crawler --url https://example.com/media-page --max-retries 5 --retry-delay 10
+./MediaNinja --url https://example.com/media-page --max-retries 5 --retry-delay 10
 ```
 
 ## 参数说明

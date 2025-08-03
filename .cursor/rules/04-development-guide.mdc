@@ -38,4 +38,4 @@ alwaysApply: false
 2. 安装 ffmpeg（用于媒体处理）
 3. 克隆仓库：`git clone [仓库URL]`
 4. 安装依赖：`go mod download`
-5. 编译项目：`go build -o media-crawler`
+5. 编译项目：`go build -o MediaNinja`

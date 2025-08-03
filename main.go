@@ -1,7 +1,7 @@
 package main
 
 import (
-	"media-crawler/cmd"
+	"MediaNinja/cmd"
 )
 
 func main() {
