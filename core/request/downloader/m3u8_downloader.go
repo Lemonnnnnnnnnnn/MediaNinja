@@ -54,12 +54,25 @@ func (m *M3U8Downloader) DownloadFromURL(m3u8URL string) error {
 	stateFile := m.getStateFilePath()
 	defer os.Remove(stateFile) // 下载完成后删除状态文件
 
+	// 确保在函数退出时清理临时文件（如果存在）
+	defer func() {
+		if _, err := os.Stat(tempFile); err == nil {
+			if removeErr := os.Remove(tempFile); removeErr != nil {
+				log.Printf("Warning: Failed to remove temp file %s: %v", tempFile, removeErr)
+			} else {
+				log.Printf("Cleaned up temporary ts file: %s", tempFile)
+			}
+		}
+	}()
+
 	// 检查是否存在未完成的下载
 	var flags int
 	if _, err := os.Stat(tempFile); err == nil {
 		flags = os.O_WRONLY | os.O_APPEND
+		log.Printf("Resuming download to existing temp file: %s", tempFile)
 	} else {
 		flags = os.O_CREATE | os.O_WRONLY
+		log.Printf("Creating new temp file for download: %s", tempFile)
 	}
 
 	// 打开或创建输出文件
@@ -70,17 +83,19 @@ func (m *M3U8Downloader) DownloadFromURL(m3u8URL string) error {
 	defer outFile.Close()
 
 	// 下载内容
+	log.Printf("Starting m3u8 content download...")
 	if err := m.downloadM3U8Content(m3u8URL, outFile); err != nil {
-		return err
+		return fmt.Errorf("failed to download m3u8 content: %w", err)
 	}
+	log.Printf("M3U8 content download completed successfully")
 
 	// 转换为 MP4
+	log.Printf("Starting conversion from ts to mp4...")
 	if err := m.convertToMP4(tempFile, m.output); err != nil {
-		return err
+		return fmt.Errorf("failed to convert ts to mp4: %w", err)
 	}
+	log.Printf("Conversion to MP4 completed successfully")
 
-	// 清理临时文件
-	os.Remove(tempFile)
 	return nil
 }
 
@@ -197,31 +212,44 @@ func (m *M3U8Downloader) downloadSegments(playlist *m3u8.MediaPlaylist, outFile 
 }
 
 func (m *M3U8Downloader) convertToMP4(inputFile, outputFile string) error {
-	// 检查 ffmpeg 是否可用
-	if _, err := exec.LookPath("ffmpeg"); err != nil {
-		return fmt.Errorf("ffmpeg not found: %w", err)
+	// 检查输入文件是否存在
+	if _, err := os.Stat(inputFile); err != nil {
+		return fmt.Errorf("input ts file not found: %s, %w", inputFile, err)
 	}
 
-	// 如果输出文件已经是 mp4 格式，则不需要转换
+	// 检查 ffmpeg 是否可用
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		return fmt.Errorf("ffmpeg not found, please install ffmpeg to convert ts to mp4: %w", err)
+	}
+
+	// 如果输出文件已经是 mp4 格式，则不需要添加扩展名
 	if !strings.HasSuffix(strings.ToLower(outputFile), ".mp4") {
 		outputFile = outputFile + ".mp4"
 	}
+
+	log.Printf("Converting %s to %s using ffmpeg...", inputFile, outputFile)
 
 	// 构建 ffmpeg 命令
 	cmd := exec.Command("ffmpeg",
 		"-i", inputFile,
 		"-c", "copy", // 直接复制流，不重新编码
 		"-bsf:a", "aac_adtstoasc", // 修复音频
-		"-y", // 覆盖已存在的文件
+		"-y",                   // 覆盖已存在的文件
+		"-loglevel", "warning", // 减少 ffmpeg 输出
 		outputFile,
 	)
 
 	// 执行命令
 	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("ffmpeg conversion failed: %s, %w", string(output), err)
+		return fmt.Errorf("ffmpeg conversion failed from %s to %s: %s, %w", inputFile, outputFile, string(output), err)
 	}
 
-	log.Printf("Successfully converted to MP4: %s", outputFile)
+	// 验证输出文件是否成功创建
+	if _, err := os.Stat(outputFile); err != nil {
+		return fmt.Errorf("mp4 file was not created successfully: %s, %w", outputFile, err)
+	}
+
+	log.Printf("Successfully converted ts to MP4: %s", outputFile)
 	return nil
 }
 
