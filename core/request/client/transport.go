@@ -65,7 +65,8 @@ func (u *uTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, fmt.Errorf("failed to get proxy URL: %v", err)
 	}
 	if proxyURL == nil {
-		return nil, fmt.Errorf("proxy URL is not configured")
+		// 没有配置代理，直接使用普通 transport 处理
+		return u.tr1.RoundTrip(req)
 	}
 
 	// 连接到 HTTP 代理
