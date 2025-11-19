@@ -30,8 +30,8 @@ func (p *Rule34VideoParser) Parse(html string) (*ParseResult, error) {
 		result.Title = &title
 	}
 
-	// 解析下载链接: #tab_video_info > div:nth-child(4) > div 的第一个 a 标签
-	downloadElement := doc.Find("#tab_video_info > div:nth-child(4) > div a").First()
+	// 解析下载链接: #tab_video_info > div:last-child > div 的第一个 a 标签
+	downloadElement := doc.Find("#tab_video_info > div:last-child > div a").First()
 	if downloadElement.Length() == 0 {
 		return result, fmt.Errorf("download link not found")
 	}
