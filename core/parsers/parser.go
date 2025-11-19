@@ -71,6 +71,8 @@ func GetParser(url string, client *client.Client) Parser {
 		return NewYingshitvParser(client, url)
 	case strings.Contains(url, "pornhub.com"):
 		return NewPornhubParser(client)
+	case strings.Contains(url, "rule34video.com"):
+		return &Rule34VideoParser{}
 	default:
 		return &DefaultParser{}
 	}
