@@ -1,9 +1,11 @@
 package client
 
 import (
+	"MediaNinja/core/events"
+	"MediaNinja/core/request/types"
+	"context"
 	"fmt"
 	"io"
-	"MediaNinja/core/request/types"
 	"net/http"
 	"net/url"
 	"time"
@@ -16,6 +18,9 @@ type DownloadOption = types.DownloadOption
 type Downloader = types.Downloader
 
 type Client struct {
+	DebugDir       string
+	Context        context.Context
+	Observer       events.Observer
 	Client         *http.Client
 	Proxy          string
 	DefaultHeaders map[string]string
@@ -35,8 +40,9 @@ func NewClient(proxyURL string, maxRetries int, retryDelay int) *Client {
 	}
 
 	return &Client{
-		Client: &http.Client{Transport: transport},
-		Proxy:  proxyURL,
+		Context: context.Background(),
+		Client:  &http.Client{Transport: transport},
+		Proxy:   proxyURL,
 		DefaultHeaders: map[string]string{
 			"accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
 			"accept-language": "en,zh-CN;q=0.9,zh;q=0.8",
@@ -66,7 +72,7 @@ func (c *Client) setHeaders(req *http.Request, opts *RequestOption) {
 
 // GetStream 执行请求并返回响应流，需要调用者负责关闭响应体
 func (c *Client) GetStream(method, url string, opts *RequestOption, headers map[string]string) (*http.Response, error) {
-	req, err := http.NewRequest(method, url, nil)
+	req, err := http.NewRequestWithContext(c.DownloadContext(), method, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -93,7 +99,9 @@ func (c *Client) Get(url string, opts *RequestOption) (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
-
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("unexpected HTTP status: %d", resp.StatusCode)
+	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
@@ -112,4 +120,22 @@ func (c *Client) GetMaxRetries() int {
 
 func (c *Client) GetRetryDelay() time.Duration {
 	return c.RetryDelay
+}
+
+func (c *Client) DownloadContext() context.Context {
+	if c.Context == nil {
+		return context.Background()
+	}
+	return c.Context
+}
+func (c *Client) Report(e events.Event) {
+	if c.Observer != nil {
+		c.Observer(e)
+	}
+}
+
+func (c *Client) Logf(format string, args ...any) {
+	if c != nil {
+		c.Report(events.Event{Type: "log", Message: fmt.Sprintf(format, args...), Time: time.Now()})
+	}
 }

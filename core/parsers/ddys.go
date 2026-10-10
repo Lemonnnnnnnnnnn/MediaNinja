@@ -1,6 +1,10 @@
 package parsers
 
 import (
+	"MediaNinja/core/request/client"
+	"MediaNinja/core/request/downloader"
+	"MediaNinja/core/request/types"
+	"MediaNinja/utils/format"
 	"bytes"
 	"compress/gzip"
 	"crypto/aes"
@@ -8,11 +12,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
-	"MediaNinja/core/request/client"
-	"MediaNinja/core/request/downloader"
-	"MediaNinja/core/request/types"
-	"MediaNinja/utils/format"
 	"net/url"
 	"strings"
 
@@ -25,9 +24,6 @@ type DDYSParser struct {
 }
 
 func NewDDYSParser(client *client.Client) *DDYSParser {
-	if client == nil {
-		log.Printf("Warning: NTDMParser initialized with nil client")
-	}
 	return &DDYSParser{
 		client: client,
 	}
@@ -76,7 +72,7 @@ func (p *DDYSParser) Parse(html string) (*ParseResult, error) {
 	for _, subtitleURLStr := range subtitleURLs {
 		data, err := p.fetchSubtitleThenDecrypt(subtitleURLStr)
 		if err != nil {
-			log.Printf("Failed to process subtitle: %v", err)
+			p.client.Logf("Failed to process subtitle: %v", err)
 			continue
 		}
 
@@ -148,7 +144,7 @@ func (d *DDYSDownloader) Download(client *client.Client, url string, filepath st
 			"Origin":          "https://ddys.pro",
 		},
 	}
-	return downloader.NewDownloader(client, true).DownloadFile(url, filepath, opts)
+	return downloader.NewDownloader(client).DownloadFile(url, filepath, opts)
 }
 
 func (d *DDYSDownloader) DownloadWithPrefix(client *client.Client, url string, filepath string, urlPrefix string) error {

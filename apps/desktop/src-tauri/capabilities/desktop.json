@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop",
+  "description": "Only the local MediaNinja main window can invoke the narrowly scoped desktop bridge. Rust also verifies the exact backend origin.",
+  "windows": [
+    "main"
+  ],
+  "remote": {
+    "urls": [
+      "http://127.0.0.1:*"
+    ]
+  },
+  "permissions": ["allow-select-output-directory", "allow-open-output-directory", "allow-notify-task"]
+}

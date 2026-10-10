@@ -1,11 +1,10 @@
 package parsers
 
 import (
-	"encoding/json"
-	"fmt"
-	"log"
 	"MediaNinja/core/request/client"
 	"MediaNinja/core/request/downloader"
+	"encoding/json"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -24,9 +23,6 @@ type PornhubParser struct {
 }
 
 func NewPornhubParser(client *client.Client) *PornhubParser {
-	if client == nil {
-		log.Printf("Warning: PornhubParser initialized with nil client")
-	}
 	return &PornhubParser{
 		client: client,
 	}
@@ -46,7 +42,7 @@ func (p *PornhubParser) Download(client *client.Client, url string, filepath str
 
 // DownloadWithPrefix 带前缀的下载方法
 func (p *PornhubParser) DownloadWithPrefix(client *client.Client, url string, filepath string, urlPrefix string) error {
-	return downloader.NewDownloader(client, true).DownloadFileWithPrefix(url, filepath, nil, urlPrefix)
+	return downloader.NewDownloader(client).DownloadFileWithPrefix(url, filepath, nil, urlPrefix)
 }
 
 // GetPrefix 返回从 master.m3u8 URL 中提取的前缀
@@ -84,7 +80,10 @@ func (m *MediaDefinition) getQualityString() string {
 // writeDebugHTML 将 HTML 内容写入调试文件
 func (p *PornhubParser) writeDebugHTML(html string, reason string) string {
 	// 创建调试目录
-	debugDir := "debug"
+	if p.client == nil || p.client.DebugDir == "" {
+		return ""
+	}
+	debugDir := p.client.DebugDir
 	os.MkdirAll(debugDir, 0755)
 
 	// 生成唯一的文件名
@@ -95,7 +94,7 @@ func (p *PornhubParser) writeDebugHTML(html string, reason string) string {
 	// 写入文件
 	err := os.WriteFile(filepath, []byte(html), 0644)
 	if err != nil {
-		log.Printf("Failed to write debug HTML file: %v", err)
+		p.client.Logf("Failed to write debug HTML file: %v", err)
 		return ""
 	}
 
@@ -108,7 +107,7 @@ func (p *PornhubParser) Parse(html string) (*ParseResult, error) {
 		// 写入调试文件
 		debugPath := p.writeDebugHTML(html, "parse_error")
 		if debugPath != "" {
-			log.Printf("Debug HTML saved to: %s", debugPath)
+			p.client.Logf("Debug HTML saved to: %s", debugPath)
 		}
 		return nil, fmt.Errorf("failed to parse HTML: %w", err)
 	}
@@ -131,7 +130,7 @@ func (p *PornhubParser) Parse(html string) (*ParseResult, error) {
 	doc.Find("script").Each(func(i int, s *goquery.Selection) {
 		scriptContent := s.Text()
 		if strings.Contains(scriptContent, "mediaDefinitions") {
-			log.Printf("Found script with mediaDefinitions, attempting to extract...")
+			p.client.Logf("Found script with mediaDefinitions, attempting to extract...")
 
 			// 更精确的正则表达式来匹配 mediaDefinitions 数组
 			// 匹配 "mediaDefinitions":[...] 的完整结构
@@ -140,17 +139,17 @@ func (p *PornhubParser) Parse(html string) (*ParseResult, error) {
 
 			if len(matches) > 1 {
 				jsonStr := matches[1]
-				log.Printf("Extracted mediaDefinitions JSON: %s", jsonStr[:min(500, len(jsonStr))]+"...")
+				p.client.Logf("Extracted mediaDefinitions JSON: %s", jsonStr[:min(500, len(jsonStr))]+"...")
 
 				err := json.Unmarshal([]byte(jsonStr), &mediaDefinitions)
 				if err != nil {
-					log.Printf("Warning: Failed to parse mediaDefinitions JSON: %v", err)
+					p.client.Logf("Warning: Failed to parse mediaDefinitions JSON: %v", err)
 
 					// 尝试另一种匹配方式 - 匹配整个 flashvars 对象然后提取
 					flashvarsRe := regexp.MustCompile(`var\s+flashvars_\d+\s*=\s*(\{.*?\});`)
 					flashvarsMatches := flashvarsRe.FindStringSubmatch(scriptContent)
 					if len(flashvarsMatches) > 1 {
-						log.Printf("Trying to extract from flashvars object...")
+						p.client.Logf("Trying to extract from flashvars object...")
 						flashvarsStr := flashvarsMatches[1]
 
 						// 从 flashvars 对象中提取 mediaDefinitions
@@ -158,22 +157,22 @@ func (p *PornhubParser) Parse(html string) (*ParseResult, error) {
 						mediaDefMatches := mediaDefRe.FindStringSubmatch(flashvarsStr)
 						if len(mediaDefMatches) > 1 {
 							jsonStr = mediaDefMatches[1]
-							log.Printf("Re-extracted mediaDefinitions JSON from flashvars: %s", jsonStr[:min(100, len(jsonStr))]+"...")
+							p.client.Logf("Re-extracted mediaDefinitions JSON from flashvars: %s", jsonStr[:min(100, len(jsonStr))]+"...")
 							err = json.Unmarshal([]byte(jsonStr), &mediaDefinitions)
 							if err == nil {
 								foundMediaDefinitions = true
-								log.Printf("Successfully parsed %d media definitions", len(mediaDefinitions))
+								p.client.Logf("Successfully parsed %d media definitions", len(mediaDefinitions))
 							} else {
-								log.Printf("Still failed to parse mediaDefinitions from flashvars: %v", err)
+								p.client.Logf("Still failed to parse mediaDefinitions from flashvars: %v", err)
 							}
 						}
 					}
 				} else {
 					foundMediaDefinitions = true
-					log.Printf("Successfully parsed %d media definitions", len(mediaDefinitions))
+					p.client.Logf("Successfully parsed %d media definitions", len(mediaDefinitions))
 				}
 			} else {
-				log.Printf("No matches found with mediaDefinitions regex")
+				p.client.Logf("No matches found with mediaDefinitions regex")
 			}
 		}
 	})
@@ -182,7 +181,7 @@ func (p *PornhubParser) Parse(html string) (*ParseResult, error) {
 		// 写入调试文件
 		debugPath := p.writeDebugHTML(html, "no_media_definitions")
 		if debugPath != "" {
-			log.Printf("Debug HTML saved to: %s", debugPath)
+			p.client.Logf("Debug HTML saved to: %s", debugPath)
 		}
 		return nil, fmt.Errorf("no mediaDefinitions found in page scripts")
 	}
@@ -191,16 +190,16 @@ func (p *PornhubParser) Parse(html string) (*ParseResult, error) {
 	bestMedia := p.selectBestQuality(mediaDefinitions)
 	if bestMedia == nil {
 		// 写入调试文件并记录所有找到的媒体定义
-		log.Printf("Found %d media definitions but none are valid:", len(mediaDefinitions))
+		p.client.Logf("Found %d media definitions but none are valid:", len(mediaDefinitions))
 		for i, media := range mediaDefinitions {
 			qualityStr := media.getQualityString()
-			log.Printf("  [%d] Quality: %s, VideoUrl: %s, Remote: %v", i, qualityStr,
+			p.client.Logf("  [%d] Quality: %s, VideoUrl: %s, Remote: %v", i, qualityStr,
 				media.VideoUrl[:min(100, len(media.VideoUrl))], media.Remote)
 		}
 
 		debugPath := p.writeDebugHTML(html, "no_valid_media")
 		if debugPath != "" {
-			log.Printf("Debug HTML saved to: %s", debugPath)
+			p.client.Logf("Debug HTML saved to: %s", debugPath)
 		}
 		return nil, fmt.Errorf("no valid media found in mediaDefinitions")
 	}
@@ -211,24 +210,24 @@ func (p *PornhubParser) Parse(html string) (*ParseResult, error) {
 		// 写入调试文件
 		debugPath := p.writeDebugHTML(html, "invalid_url")
 		if debugPath != "" {
-			log.Printf("Debug HTML saved to: %s", debugPath)
+			p.client.Logf("Debug HTML saved to: %s", debugPath)
 		}
 		return nil, fmt.Errorf("failed to parse video URL: %w", err)
 	}
 
 	qualityStr := bestMedia.getQualityString()
-	log.Printf("Selected best quality: %s, URL: %s", qualityStr, bestMedia.VideoUrl[:min(100, len(bestMedia.VideoUrl))])
+	p.client.Logf("Selected best quality: %s, URL: %s", qualityStr, bestMedia.VideoUrl[:min(100, len(bestMedia.VideoUrl))])
 
 	// 如果是 HLS master.m3u8，获取实际的分片 m3u8 链接
 	finalVideoURL := videoURL
 	if bestMedia.Format == "hls" && strings.Contains(bestMedia.VideoUrl, "master.m3u8") {
-		log.Printf("Detected HLS master.m3u8, fetching segment m3u8...")
+		p.client.Logf("Detected HLS master.m3u8, fetching segment m3u8...")
 		finalVideoURL, err = url.Parse(bestMedia.VideoUrl)
 		if err != nil {
-			log.Printf("Warning: Failed to parse segment URL: %v, using master URL", err)
+			p.client.Logf("Warning: Failed to parse segment URL: %v, using master URL", err)
 			finalVideoURL = videoURL
 		} else {
-			log.Printf("Successfully obtained segment m3u8 URL: %s", bestMedia.VideoUrl)
+			p.client.Logf("Successfully obtained segment m3u8 URL: %s", bestMedia.VideoUrl)
 		}
 	}
 

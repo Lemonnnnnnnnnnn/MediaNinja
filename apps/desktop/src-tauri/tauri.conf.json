@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MediaNinja",
+  "version": "0.1.0",
+  "identifier": "io.medianinja.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm --dir ../.. build:sidecar",
+    "beforeBuildCommand": "pnpm --dir ../.. build:sidecar",
+    "frontendDist": "../../frontend/dist"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null,
+      "capabilities": [
+        "desktop"
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/icon.ico"
+    ],
+    "externalBin": [
+      "binaries/medianinja-core"
+    ],
+    "windows": {
+      "nsis": {
+        "displayLanguageSelector": false,
+        "languages": [
+          "SimpChinese"
+        ],
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

@@ -3,7 +3,6 @@ package parsers
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"regexp"
 	"strings"
 
@@ -25,9 +24,6 @@ type XifanacgParser struct {
 type XifanacgDownloader struct{}
 
 func NewXifanacgParser(client *client.Client) *XifanacgParser {
-	if client == nil {
-		log.Printf("Warning: XifanacgParser initialized with nil client")
-	}
 	return &XifanacgParser{
 		client:     client,
 		downloader: XifanacgDownloader{},
@@ -37,17 +33,17 @@ func NewXifanacgParser(client *client.Client) *XifanacgParser {
 
 func (p *XifanacgParser) Parse(html string) (*ParseResult, error) {
 	title := p.parseTitle(html)
-	log.Printf("Parsed title: %s", title)
+	p.client.Logf("Parsed title: %s", title)
 
 	episodeURLs := p.parseEpisodeURLs(html)
-	log.Printf("Found %d episode URLs", len(episodeURLs))
+	p.client.Logf("Found %d episode URLs", len(episodeURLs))
 
 	// Extract current episode video URL from the input HTML
 	currentVideoURL, err := p.parseVideoURLFromHTML(html)
 	if err != nil {
-		log.Printf("Failed to parse current episode video: %v", err)
+		p.client.Logf("Failed to parse current episode video: %v", err)
 	} else {
-		log.Printf("Found current episode video: %s", currentVideoURL)
+		p.client.Logf("Found current episode video: %s", currentVideoURL)
 	}
 
 	result := &ParseResult{
@@ -72,7 +68,7 @@ func (p *XifanacgParser) Parse(html string) (*ParseResult, error) {
 				MediaType: Video,
 				Filename:  filename,
 			})
-			log.Printf("Added current episode video: %s", filename)
+			p.client.Logf("Added current episode video: %s", filename)
 		}
 	}
 
@@ -87,7 +83,7 @@ func (p *XifanacgParser) Parse(html string) (*ParseResult, error) {
 	for i, episodeURL := range episodeURLs {
 		idx, u := i, episodeURL
 		p.limiter.Execute(func() {
-			log.Printf("Processing episode %d: %s", idx+1, u)
+			p.client.Logf("Processing episode %d: %s", idx+1, u)
 			videoURL, err := p.parseEpisodeVideoURL(u)
 			if err != nil {
 				resultChan <- episodeResult{idx, nil, err}
@@ -126,12 +122,13 @@ func (p *XifanacgParser) Parse(html string) (*ParseResult, error) {
 	for range episodeURLs {
 		res := <-resultChan
 		if res.err != nil {
-			log.Printf("Failed to parse episode %d: %v", res.index+1, res.err)
+			result.Failures = append(result.Failures, res.err.Error())
+			p.client.Logf("Failed to parse episode %d: %v", res.index+1, res.err)
 			continue
 		}
 		if res.mediaInfo != nil {
 			mediaInfos[res.index] = res.mediaInfo
-			log.Printf("Successfully added video %d: %s", res.index+1, res.mediaInfo.URL.String())
+			p.client.Logf("Successfully added video %d: %s", res.index+1, res.mediaInfo.URL.String())
 		}
 	}
 
@@ -142,7 +139,7 @@ func (p *XifanacgParser) Parse(html string) (*ParseResult, error) {
 		}
 	}
 
-	log.Printf("Parsing completed, found %d videos", len(result.Media))
+	p.client.Logf("Parsing completed, found %d videos", len(result.Media))
 	return result, nil
 }
 
@@ -151,7 +148,7 @@ func (p *XifanacgParser) GetDownloader() Downloader {
 }
 
 func (d *XifanacgDownloader) Download(_client *client.Client, url string, filepath string) error {
-	client := client.NewClient("", 3, 1)
+	client := _client
 	opts := &types.RequestOption{
 		Headers: map[string]string{
 			"Accept":          "*/*",
@@ -164,7 +161,7 @@ func (d *XifanacgDownloader) Download(_client *client.Client, url string, filepa
 			"Sec-Fetch-Site":  "cross-site",
 		},
 	}
-	return downloader.NewDownloader(client, true).DownloadFile(url, filepath, opts)
+	return downloader.NewDownloader(client).DownloadFile(url, filepath, opts)
 }
 
 func (d *XifanacgDownloader) DownloadWithPrefix(client *client.Client, url string, filepath string, urlPrefix string) error {
@@ -245,7 +242,7 @@ func (p *XifanacgParser) parseVideoURLFromHTML(html string) (string, error) {
 				URL string `json:"url"`
 			}
 			if err := json.Unmarshal([]byte(matches[1]), &playerInfo); err != nil {
-				log.Printf("Failed to parse JSON with pattern '%s': %v", pattern, err)
+				p.client.Logf("Failed to parse JSON with pattern '%s': %v", pattern, err)
 				continue // Try next pattern
 			}
 
@@ -263,7 +260,7 @@ func (p *XifanacgParser) parseEpisodeVideoURL(episodeURL string) (string, error)
 		return "", fmt.Errorf("client is nil")
 	}
 
-	log.Printf("Fetching episode page: %s", episodeURL)
+	p.client.Logf("Fetching episode page: %s", episodeURL)
 	html, err := p.client.Get(episodeURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch episode page: %w", err)

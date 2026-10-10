@@ -1,0 +1,20 @@
+{
+  "name": "medianinja-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.18.0",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "pnpm --filter @medianinja/frontend dev",
+    "build:frontend": "pnpm --filter @medianinja/frontend build",
+    "build:web": "node scripts/build.mjs web",
+    "build:sidecar": "node scripts/build.mjs sidecar",
+    "desktop:dev": "pnpm --filter @medianinja/desktop dev",
+    "desktop:build": "pnpm --filter @medianinja/desktop build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "test:sidecar": "node scripts/test-sidecar.mjs"
+  }
+}

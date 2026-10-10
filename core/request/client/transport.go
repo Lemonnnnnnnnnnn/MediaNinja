@@ -2,7 +2,9 @@ package client
 
 import (
 	"bufio"
+	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"time"
@@ -75,11 +77,22 @@ func (u *uTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 
 	// 连接到 HTTP 代理
-	conn, err := net.DialTimeout("tcp", proxyURL.Host, 10*time.Second)
+	dialer := net.Dialer{Timeout: 10 * time.Second}
+	conn, err := dialer.DialContext(req.Context(), "tcp", proxyURL.Host)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to proxy: %v", err)
 	}
 
+	// Keep cancellation active until the returned response body is closed.
+	stop := context.AfterFunc(req.Context(), func() { conn.Close() })
+	handedOff := false
+	defer func() {
+		if !handedOff {
+			stop()
+			conn.Close()
+		}
+	}()
+	conn.SetDeadline(time.Now().Add(30 * time.Second))
 	// 发送 CONNECT 请求
 	dest := req.URL.Host
 	if req.URL.Port() == "" {
@@ -110,11 +123,12 @@ func (u *uTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		tlsConn.Close()
 		return nil, fmt.Errorf("uConn.ApplyPreset() error: %+v", err)
 	}
-	if err = tlsConn.Handshake(); err != nil {
+	if err = tlsConn.HandshakeContext(req.Context()); err != nil {
 		tlsConn.Close()
 		return nil, fmt.Errorf("TLS handshake failed: %+v", err)
 	}
 
+	conn.SetDeadline(time.Time{})
 	// 处理 ALPN (HTTP/2 或 HTTP/1.1)
 	alpn := tlsConn.ConnectionState().NegotiatedProtocol
 	switch alpn {
@@ -124,7 +138,13 @@ func (u *uTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		req.ProtoMinor = 0
 
 		if c, err := u.tr2.NewClientConn(tlsConn); err == nil {
-			return c.RoundTrip(req)
+			response, err := c.RoundTrip(req)
+			if err != nil {
+				return nil, err
+			}
+			handedOff = true
+			response.Body = &connectionBody{ReadCloser: response.Body, conn: conn, stop: stop}
+			return response, nil
 		} else {
 			return nil, fmt.Errorf("http2.Transport.NewClientConn() error: %+v", err)
 		}
@@ -135,7 +155,13 @@ func (u *uTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		req.ProtoMinor = 1
 
 		if err := req.Write(tlsConn); err == nil {
-			return http.ReadResponse(bufio.NewReader(tlsConn), req)
+			response, err := http.ReadResponse(bufio.NewReader(tlsConn), req)
+			if err != nil {
+				return nil, err
+			}
+			handedOff = true
+			response.Body = &connectionBody{ReadCloser: response.Body, conn: conn, stop: stop}
+			return response, nil
 		} else {
 			return nil, fmt.Errorf("http.Request.Write() error: %+v", err)
 		}
@@ -143,4 +169,17 @@ func (u *uTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	default:
 		return nil, fmt.Errorf("unsupported ALPN: %v", alpn)
 	}
+}
+
+type connectionBody struct {
+	io.ReadCloser
+	conn net.Conn
+	stop func() bool
+}
+
+func (b *connectionBody) Close() error {
+	b.stop()
+	b.conn.Close()
+	err := b.ReadCloser.Close()
+	return err
 }

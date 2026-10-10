@@ -1,13 +1,12 @@
 package parsers
 
 import (
+	"MediaNinja/core/request/client"
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"log"
-	"MediaNinja/core/request/client"
 	"net/url"
 	"regexp"
 	"strings"
@@ -23,9 +22,6 @@ type NTDMParser struct {
 }
 
 func NewNTDMParser(client *client.Client) *NTDMParser {
-	if client == nil {
-		log.Printf("Warning: NTDMParser initialized with nil client")
-	}
 	return &NTDMParser{
 		client: client,
 	}
@@ -33,10 +29,10 @@ func NewNTDMParser(client *client.Client) *NTDMParser {
 
 func (p *NTDMParser) Parse(html string) (*ParseResult, error) {
 	title := p.parseTitle(html)
-	log.Printf("Parsed title: %s", title)
+	p.client.Logf("Parsed title: %s", title)
 
 	urls := p.parseEpisodeURLs(html)
-	log.Printf("Found %d episode URLs", len(urls))
+	p.client.Logf("Found %d episode URLs", len(urls))
 
 	result := &ParseResult{
 		Media: make([]MediaInfo, 0),
@@ -58,7 +54,7 @@ func (p *NTDMParser) Parse(html string) (*ParseResult, error) {
 	// 启动goroutine处理每个episode
 	for i, episodeURL := range urls {
 		go func(idx int, u string) {
-			log.Printf("Processing episode %d: %s", idx+1, u)
+			p.client.Logf("Processing episode %d: %s", idx+1, u)
 			videoURL, err := p.parseEpisodeVideo(u)
 			if err != nil {
 				resultChan <- episodeResult{idx, nil, err}
@@ -90,12 +86,13 @@ func (p *NTDMParser) Parse(html string) (*ParseResult, error) {
 	for range urls {
 		res := <-resultChan
 		if res.err != nil {
-			log.Printf("Failed to parse episode %d: %v", res.index+1, res.err)
+			result.Failures = append(result.Failures, res.err.Error())
+			p.client.Logf("Failed to parse episode %d: %v", res.index+1, res.err)
 			continue
 		}
 		if res.mediaInfo != nil {
 			mediaInfos[res.index] = res.mediaInfo
-			log.Printf("Successfully added video %d: %s", res.index+1, res.mediaInfo.URL.String())
+			p.client.Logf("Successfully added video %d: %s", res.index+1, res.mediaInfo.URL.String())
 		}
 	}
 
@@ -106,7 +103,7 @@ func (p *NTDMParser) Parse(html string) (*ParseResult, error) {
 		}
 	}
 
-	log.Printf("Parsing completed, found %d videos", len(result.Media))
+	p.client.Logf("Parsing completed, found %d videos", len(result.Media))
 	return result, nil
 }
 
@@ -142,7 +139,7 @@ func (p *NTDMParser) parseEpisodeVideo(url string) (string, error) {
 		return "", fmt.Errorf("client is nil")
 	}
 
-	log.Printf("Fetching episode page: %s", url)
+	p.client.Logf("Fetching episode page: %s", url)
 	html, err := p.client.Get(url, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch episode page: %w", err)
@@ -176,12 +173,12 @@ func (p *NTDMParser) parseVideoInfo(html string) (string, error) {
 	}
 
 	yhdmURL := fmt.Sprintf("https://danmu.yhdmjx.com/m3u8.php?url=%s", playerInfo.URL)
-	log.Printf("Generated YHDM URL: %s", yhdmURL)
+	p.client.Logf("Generated YHDM URL: %s", yhdmURL)
 	return p.parseYhdmURL(yhdmURL)
 }
 
 func (p *NTDMParser) parseYhdmURL(url string) (string, error) {
-	log.Printf("Fetching YHDM page: %s", url)
+	p.client.Logf("Fetching YHDM page: %s", url)
 	html, err := p.client.Get(url, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to fetch yhdm page: %w", err)

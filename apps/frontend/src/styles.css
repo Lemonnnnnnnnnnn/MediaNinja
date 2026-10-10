@@ -1,0 +1,18 @@
+@import "tailwindcss";
+@source "../../../packages";
+@theme inline {
+  --color-background: var(--background); --color-foreground: var(--foreground);
+  --color-card: var(--card); --color-card-foreground: var(--foreground);
+  --color-primary: var(--primary); --color-primary-foreground: #ffffff;
+  --color-muted: #eef1ec; --color-muted-foreground: #778178;
+  --color-accent: #edf3ee; --color-accent-foreground: #254f3c;
+  --color-border: #e1e6df; --color-input: #dce3da; --color-ring: #4b795b;
+  --color-destructive: #b6423b;
+}
+:root { --background: #f6f7f3; --foreground: #24342a; --card: #fff; --primary: #2d6047; font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif; color: var(--foreground); background: var(--background); }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 360px; }
+button, input, select { font: inherit; }
+button { cursor: pointer; }
+::selection { background: #d9e9dc; }
+progress { accent-color: var(--primary); }

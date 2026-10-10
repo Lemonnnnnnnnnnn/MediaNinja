@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-output-directory"
+description = "Enables the open_output_directory command without any pre-configured scope."
+commands.allow = ["open_output_directory"]
+
+[[permission]]
+identifier = "deny-open-output-directory"
+description = "Denies the open_output_directory command without any pre-configured scope."
+commands.deny = ["open_output_directory"]

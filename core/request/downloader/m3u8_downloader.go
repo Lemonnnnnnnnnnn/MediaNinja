@@ -1,13 +1,14 @@
 package downloader
 
 import (
+	"MediaNinja/core/events"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"net/url"
 	"os"
 	"os/exec"
-	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/grafov/m3u8"
@@ -17,7 +18,7 @@ type M3U8Downloader struct {
 	client       ClientInterface
 	output       string
 	opts         *RequestOption
-	showProgress bool
+	customPrefix bool
 	urlPrefix    string // 添加 URL 前缀字段
 }
 
@@ -27,24 +28,23 @@ type downloadState struct {
 	TotalSegments      int             `json:"total_segments"`
 }
 
-func NewM3U8Downloader(client ClientInterface, output string, opts *RequestOption, showProgress bool) *M3U8Downloader {
+func NewM3U8Downloader(client ClientInterface, output string, opts *RequestOption) *M3U8Downloader {
 	return &M3U8Downloader{
-		client:       client,
-		output:       output,
-		opts:         opts,
-		showProgress: showProgress,
-		urlPrefix:    "", // 默认为空
+		client:    client,
+		output:    output,
+		opts:      opts,
+		urlPrefix: "", // 默认为空
 	}
 }
 
 // NewM3U8DownloaderWithPrefix 创建带前缀的 M3U8 下载器
-func NewM3U8DownloaderWithPrefix(client ClientInterface, output string, opts *RequestOption, showProgress bool, urlPrefix string) *M3U8Downloader {
+func NewM3U8DownloaderWithPrefix(client ClientInterface, output string, opts *RequestOption, urlPrefix string) *M3U8Downloader {
 	return &M3U8Downloader{
 		client:       client,
 		output:       output,
 		opts:         opts,
-		showProgress: showProgress,
 		urlPrefix:    urlPrefix,
+		customPrefix: urlPrefix != "",
 	}
 }
 
@@ -52,27 +52,17 @@ func (m *M3U8Downloader) DownloadFromURL(m3u8URL string) error {
 	// 创建临时文件用于存储 ts 文件
 	tempFile := m.output + ".ts"
 	stateFile := m.getStateFilePath()
-	defer os.Remove(stateFile) // 下载完成后删除状态文件
-
-	// 确保在函数退出时清理临时文件（如果存在）
-	defer func() {
-		if _, err := os.Stat(tempFile); err == nil {
-			if removeErr := os.Remove(tempFile); removeErr != nil {
-				log.Printf("Warning: Failed to remove temp file %s: %v", tempFile, removeErr)
-			} else {
-				log.Printf("Cleaned up temporary ts file: %s", tempFile)
-			}
-		}
-	}()
+	// Preserve resume state on failure.
 
 	// 检查是否存在未完成的下载
 	var flags int
-	if _, err := os.Stat(tempFile); err == nil {
+	if _, err := os.Stat(tempFile); err == nil && m.loadDownloadState() != nil {
 		flags = os.O_WRONLY | os.O_APPEND
-		log.Printf("Resuming download to existing temp file: %s", tempFile)
+		logf(m.client, "Resuming download to existing temp file: %s", tempFile)
 	} else {
-		flags = os.O_CREATE | os.O_WRONLY
-		log.Printf("Creating new temp file for download: %s", tempFile)
+		flags = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+		os.Remove(stateFile)
+		logf(m.client, "Creating new temp file for download: %s", tempFile)
 	}
 
 	// 打开或创建输出文件
@@ -83,24 +73,29 @@ func (m *M3U8Downloader) DownloadFromURL(m3u8URL string) error {
 	defer outFile.Close()
 
 	// 下载内容
-	log.Printf("Starting m3u8 content download...")
+	logf(m.client, "Starting m3u8 content download...")
 	if err := m.downloadM3U8Content(m3u8URL, outFile); err != nil {
 		return fmt.Errorf("failed to download m3u8 content: %w", err)
 	}
-	log.Printf("M3U8 content download completed successfully")
+	logf(m.client, "M3U8 content download completed successfully")
 
+	if err := outFile.Close(); err != nil {
+		return err
+	}
 	// 转换为 MP4
-	log.Printf("Starting conversion from ts to mp4...")
+	logf(m.client, "Starting conversion from ts to mp4...")
 	if err := m.convertToMP4(tempFile, m.output); err != nil {
 		return fmt.Errorf("failed to convert ts to mp4: %w", err)
 	}
-	log.Printf("Conversion to MP4 completed successfully")
+	logf(m.client, "Conversion to MP4 completed successfully")
+	os.Remove(stateFile)
+	os.Remove(tempFile)
 
 	return nil
 }
 
 func (m *M3U8Downloader) downloadM3U8Content(m3u8URL string, outFile *os.File) error {
-	log.Printf("Starting download from URL: %s", m3u8URL)
+	logf(m.client, "Starting download from URL: %s", m3u8URL)
 
 	// 获取 m3u8 内容
 	resp, err := m.client.GetStream("GET", m3u8URL, m.opts, nil)
@@ -109,13 +104,19 @@ func (m *M3U8Downloader) downloadM3U8Content(m3u8URL string, outFile *os.File) e
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("playlist HTTP status %d", resp.StatusCode)
+	}
+	if !m.customPrefix {
+		m.urlPrefix = m.extractURLPrefix(m3u8URL)
+	}
 	// 解析 m3u8 文件
 	playlist, listType, err := m3u8.DecodeFrom(resp.Body, true)
 	if err != nil {
 		return fmt.Errorf("failed to decode m3u8: %w", err)
 	}
 
-	log.Printf("listType: %+v", listType)
+	logf(m.client, "listType: %+v", listType)
 
 	// 处理不同类型的播放列表
 	switch listType {
@@ -148,12 +149,7 @@ func (m *M3U8Downloader) downloadSegments(playlist *m3u8.MediaPlaylist, outFile 
 		}
 	}
 
-	// 创建进度显示器
-	var progress *DownloadProgress
-	if m.showProgress {
-		progress = NewDownloadProgress(path.Base(m.output), int64(totalSegments), int64(len(state.DownloadedSegments)))
-	}
-
+	report(m.client, events.Event{Type: "progress", File: m.output, Completed: int64(len(state.DownloadedSegments)), Total: int64(totalSegments), Unit: "segments"})
 	// 下载所有片段
 	for _, segment := range playlist.Segments {
 		if segment == nil {
@@ -171,12 +167,13 @@ func (m *M3U8Downloader) downloadSegments(playlist *m3u8.MediaPlaylist, outFile 
 		// 下载分片
 		resp, err := m.client.GetStream("GET", segmentURL, m.opts, nil)
 		if err != nil {
-			if progress != nil {
-				progress.Fail(err)
-			}
 			return fmt.Errorf("failed to download segment %s: %w", segment.URI, err)
 		}
 
+		if resp.StatusCode != 200 {
+			resp.Body.Close()
+			return fmt.Errorf("segment HTTP status %d", resp.StatusCode)
+		}
 		// 获取文件当前位置用于写入
 		currentPos, err := outFile.Seek(0, io.SeekEnd)
 		if err != nil {
@@ -188,9 +185,6 @@ func (m *M3U8Downloader) downloadSegments(playlist *m3u8.MediaPlaylist, outFile 
 		_, err = io.Copy(outFile, resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			if progress != nil {
-				progress.Fail(err)
-			}
 			// 如果写入失败，回滚文件位置
 			outFile.Truncate(currentPos)
 			return fmt.Errorf("failed to write segment: %w", err)
@@ -198,16 +192,15 @@ func (m *M3U8Downloader) downloadSegments(playlist *m3u8.MediaPlaylist, outFile 
 
 		// 标记该片段已下载
 		state.DownloadedSegments[segment.URI] = true
-		m.saveDownloadState(state)
-
-		if progress != nil {
-			progress.Update(1)
+		if err := m.saveDownloadState(state); err != nil {
+			delete(state.DownloadedSegments, segment.URI)
+			outFile.Truncate(currentPos)
+			return err
 		}
+		report(m.client, events.Event{Type: "progress", File: m.output, Completed: int64(len(state.DownloadedSegments)), Total: int64(totalSegments), Unit: "segments"})
+
 	}
 
-	if progress != nil {
-		progress.Success()
-	}
 	return nil
 }
 
@@ -218,8 +211,20 @@ func (m *M3U8Downloader) convertToMP4(inputFile, outputFile string) error {
 	}
 
 	// 检查 ffmpeg 是否可用
-	if _, err := exec.LookPath("ffmpeg"); err != nil {
-		return fmt.Errorf("ffmpeg not found, please install ffmpeg to convert ts to mp4: %w", err)
+	binary, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		executable, execErr := os.Executable()
+		if execErr != nil {
+			return execErr
+		}
+		name := "ffmpeg"
+		if filepath.Ext(executable) == ".exe" {
+			name = "ffmpeg.exe"
+		}
+		binary = filepath.Join(filepath.Dir(executable), name)
+		if _, statErr := os.Stat(binary); statErr != nil {
+			return fmt.Errorf("ffmpeg not found in PATH or beside executable: %w", err)
+		}
 	}
 
 	// 如果输出文件已经是 mp4 格式，则不需要添加扩展名
@@ -227,10 +232,10 @@ func (m *M3U8Downloader) convertToMP4(inputFile, outputFile string) error {
 		outputFile = outputFile + ".mp4"
 	}
 
-	log.Printf("Converting %s to %s using ffmpeg...", inputFile, outputFile)
+	logf(m.client, "Converting %s to %s using ffmpeg...", inputFile, outputFile)
 
 	// 构建 ffmpeg 命令
-	cmd := exec.Command("ffmpeg",
+	cmd := exec.CommandContext(downloadContext(m.client), binary,
 		"-i", inputFile,
 		"-c", "copy", // 直接复制流，不重新编码
 		"-bsf:a", "aac_adtstoasc", // 修复音频
@@ -249,13 +254,13 @@ func (m *M3U8Downloader) convertToMP4(inputFile, outputFile string) error {
 		return fmt.Errorf("mp4 file was not created successfully: %s, %w", outputFile, err)
 	}
 
-	log.Printf("Successfully converted ts to MP4: %s", outputFile)
+	logf(m.client, "Successfully converted ts to MP4: %s", outputFile)
 	return nil
 }
 
 // handleMasterPlaylist 处理 master 播放列表，获取分片 m3u8 链接并继续下载
 func (m *M3U8Downloader) handleMasterPlaylist(masterPlaylist *m3u8.MasterPlaylist, masterURL string, outFile *os.File) error {
-	log.Printf("Processing master playlist with %d variants", len(masterPlaylist.Variants))
+	logf(m.client, "Processing master playlist with %d variants", len(masterPlaylist.Variants))
 
 	// 查找合适的变体（优先选择第一个可用的）
 	var selectedVariant *m3u8.Variant
@@ -270,7 +275,7 @@ func (m *M3U8Downloader) handleMasterPlaylist(masterPlaylist *m3u8.MasterPlaylis
 		return fmt.Errorf("no valid variant found in master playlist")
 	}
 
-	log.Printf("Selected variant: %s", selectedVariant.URI)
+	logf(m.client, "Selected variant: %s", selectedVariant.URI)
 
 	// 构造分片 m3u8 URL
 	segmentURL, err := m.buildVariantURL(selectedVariant.URI, masterURL)
@@ -281,10 +286,10 @@ func (m *M3U8Downloader) handleMasterPlaylist(masterPlaylist *m3u8.MasterPlaylis
 	// 更新 URL 前缀以便后续分片下载使用
 	if m.urlPrefix == "" {
 		m.urlPrefix = m.extractURLPrefix(masterURL)
-		log.Printf("Extracted URL prefix: %s", m.urlPrefix)
+		logf(m.client, "Extracted URL prefix: %s", m.urlPrefix)
 	}
 
-	log.Printf("Requesting segment m3u8 from: %s", segmentURL)
+	logf(m.client, "Requesting segment m3u8 from: %s", segmentURL)
 
 	// 递归下载分片 m3u8
 	return m.downloadM3U8Content(segmentURL, outFile)
@@ -292,22 +297,15 @@ func (m *M3U8Downloader) handleMasterPlaylist(masterPlaylist *m3u8.MasterPlaylis
 
 // buildVariantURL 根据 variant URI 和 master URL 构造完整的分片 URL
 func (m *M3U8Downloader) buildVariantURL(variantURI, masterURL string) (string, error) {
-	// 如果 variant URI 已经是完整的 URL，直接返回
-	if strings.HasPrefix(variantURI, "http://") || strings.HasPrefix(variantURI, "https://") {
-		return variantURI, nil
+	base, err := url.Parse(masterURL)
+	if err != nil {
+		return "", err
 	}
-
-	// 提取 master URL 的前缀
-	prefix := m.extractURLPrefix(masterURL)
-	if prefix == "" {
-		return "", fmt.Errorf("failed to extract URL prefix from: %s", masterURL)
+	ref, err := url.Parse(variantURI)
+	if err != nil {
+		return "", err
 	}
-
-	// 组合前缀和 variant URI
-	prefix = strings.TrimSuffix(prefix, "/")
-	uri := strings.TrimPrefix(variantURI, "/")
-
-	return prefix + "/" + uri, nil
+	return base.ResolveReference(ref).String(), nil
 }
 
 // extractURLPrefix 从 master URL 中提取前缀（去掉文件名部分）
@@ -324,22 +322,15 @@ func (m *M3U8Downloader) extractURLPrefix(masterURL string) string {
 
 // buildSegmentURL 根据 segment URI 和 urlPrefix 构建完整的 URL
 func (m *M3U8Downloader) buildSegmentURL(segmentURI string) string {
-	// 如果 segment URI 已经是完整的 URL，直接返回
-	if strings.HasPrefix(segmentURI, "http://") || strings.HasPrefix(segmentURI, "https://") {
+	base, err := url.Parse(strings.TrimSuffix(m.urlPrefix, "/") + "/")
+	if err != nil {
 		return segmentURI
 	}
-
-	// 如果没有设置前缀，直接返回原始 URI
-	if m.urlPrefix == "" {
+	ref, err := url.Parse(segmentURI)
+	if err != nil {
 		return segmentURI
 	}
-
-	// 组合前缀和 segment URI
-	// 确保前缀末尾没有 "/" 且 segmentURI 开头没有 "/"
-	prefix := strings.TrimSuffix(m.urlPrefix, "/")
-	uri := strings.TrimPrefix(segmentURI, "/")
-
-	return prefix + "/" + uri
+	return base.ResolveReference(ref).String()
 }
 
 func (m *M3U8Downloader) getStateFilePath() string {

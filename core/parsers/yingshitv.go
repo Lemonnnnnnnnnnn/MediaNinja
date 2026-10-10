@@ -1,10 +1,9 @@
 package parsers
 
 import (
+	"MediaNinja/core/request/client"
 	"encoding/json"
 	"fmt"
-	"log"
-	"MediaNinja/core/request/client"
 	"net/url"
 	"strings"
 )
@@ -16,9 +15,6 @@ type YingshitvParser struct {
 }
 
 func NewYingshitvParser(client *client.Client, url string) *YingshitvParser {
-	if client == nil {
-		log.Printf("Warning: YingshitvParser initialized with nil client")
-	}
 
 	return &YingshitvParser{
 		client: client,
@@ -27,13 +23,13 @@ func NewYingshitvParser(client *client.Client, url string) *YingshitvParser {
 }
 
 func (p *YingshitvParser) Parse(_ string) (*ParseResult, error) {
-	log.Printf("Starting to parse URL: %s", p.url)
+	p.client.Logf("Starting to parse URL: %s", p.url)
 	videoInfo, err := p.fetchVideoInfo()
 	if err != nil {
-		log.Printf("Error fetching video info: %v", err)
+		p.client.Logf("Error fetching video info: %v", err)
 		return nil, fmt.Errorf("failed to fetch video info: %w", err)
 	}
-	log.Printf("Successfully fetched video info for URL: %s", p.url)
+	p.client.Logf("Successfully fetched video info for URL: %s", p.url)
 
 	result := &ParseResult{
 		Media: make([]MediaInfo, 0),
@@ -65,10 +61,10 @@ type VideoMeta struct {
 }
 
 func (p *YingshitvParser) parseVideoMeta() (VideoMeta, error) {
-	log.Printf("Parsing video meta from URL: %s", p.url)
+	p.client.Logf("Parsing video meta from URL: %s", p.url)
 	videoURL, err := url.Parse(p.url)
 	if err != nil {
-		log.Printf("Error parsing URL %s: %v", p.url, err)
+		p.client.Logf("Error parsing URL %s: %v", p.url, err)
 		return VideoMeta{}, fmt.Errorf("failed to parse URL %s: %w", p.url, err)
 	}
 
@@ -128,15 +124,15 @@ type VideoInfoResponse struct {
 }
 
 func (p *YingshitvParser) fetchVideoInfo() (VideoInfo, error) {
-	log.Printf("Fetching video info for videoMeta: %v", p.url)
+	p.client.Logf("Fetching video info for videoMeta: %v", p.url)
 	videoMeta, err := p.parseVideoMeta()
 	if err != nil {
-		log.Printf("Error parsing video meta: %v", err)
+		p.client.Logf("Error parsing video meta: %v", err)
 		return VideoInfo{}, fmt.Errorf("failed to parse video meta: %w", err)
 	}
 
 	url := fmt.Sprintf("https://api.yingshi.tv/vod/v1/info?id=%s&tid=%s", videoMeta.id, videoMeta.tid)
-	log.Printf("Requesting video info from URL: %s", url)
+	p.client.Logf("Requesting video info from URL: %s", url)
 
 	var videoInfo VideoInfoResponse
 	resp, err := p.client.Get(url, nil)
