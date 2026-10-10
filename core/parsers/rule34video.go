@@ -11,7 +11,6 @@ import (
 
 	"MediaNinja/core/request/client"
 	"MediaNinja/utils/concurrent"
-	"MediaNinja/utils/logger"
 
 	"github.com/PuerkitoBio/goquery"
 )
@@ -23,14 +22,8 @@ type Rule34ListOptions struct {
 	Concurrency int // 抓取视频子页面的并发数
 }
 
-// Rule34Options 列表页抓取的默认选项
-var Rule34Options = Rule34ListOptions{
-	MaxPages:    1,
-	MaxVideos:   0,
-	Concurrency: 4,
-}
-
 type Rule34VideoParser struct {
+	options  Rule34ListOptions
 	client   *client.Client
 	entryURL *url.URL
 	DefaultDownloader
@@ -41,14 +34,12 @@ type Rule34VideoParser struct {
 }
 
 func NewRule34VideoParser(c *client.Client, pageURL string) *Rule34VideoParser {
-	if c == nil {
-		logger.Error("Rule34VideoParser initialized with nil client")
-	}
 	entry, _ := url.Parse(pageURL)
 	return &Rule34VideoParser{
 		client:         c,
 		entryURL:       entry,
 		pageByDownload: make(map[string]string),
+		options:        Rule34ListOptions{MaxPages: 1, Concurrency: 4},
 	}
 }
 
@@ -172,11 +163,12 @@ func (p *Rule34VideoParser) parseListPage(doc *goquery.Document) (*ParseResult, 
 	// 直接构造页码 URL 时若返回空结果则停止翻页
 	if p.client != nil {
 		basePath := p.listBasePath()
-		for page := 2; page <= Rule34Options.MaxPages && basePath != ""; page++ {
+		for page := 2; page <= p.options.MaxPages && basePath != ""; page++ {
 			pageURL := "https://rule34video.com" + basePath + strconv.Itoa(page) + "/"
 			sub, err := p.fetchDoc(pageURL)
 			if err != nil {
-				logger.Error(fmt.Sprintf("Failed to fetch list page %s: %v", pageURL, err))
+				p.client.Logf("%s", fmt.Sprintf("Failed to fetch list page %s: %v", pageURL, err))
+				result.Failures = append(result.Failures, err.Error())
 				break
 			}
 			pageEntries := extractVideoEntries(sub)
@@ -187,15 +179,15 @@ func (p *Rule34VideoParser) parseListPage(doc *goquery.Document) (*ParseResult, 
 		}
 	}
 
-	logger.Info(fmt.Sprintf("Found %d videos on %s", len(entries), listTitle))
+	p.client.Logf("%s", fmt.Sprintf("Found %d videos on %s", len(entries), listTitle))
 
-	if Rule34Options.MaxVideos > 0 && len(entries) > Rule34Options.MaxVideos {
-		entries = entries[:Rule34Options.MaxVideos]
-		logger.Info(fmt.Sprintf("Limited to first %d videos", Rule34Options.MaxVideos))
+	if p.options.MaxVideos > 0 && len(entries) > p.options.MaxVideos {
+		entries = entries[:p.options.MaxVideos]
+		p.client.Logf("%s", fmt.Sprintf("Limited to first %d videos", p.options.MaxVideos))
 	}
 
 	// 并发抓取每个视频页，提取真实下载链接
-	limiter := concurrent.NewLimiter(Rule34Options.Concurrency)
+	limiter := concurrent.NewLimiter(p.options.Concurrency)
 	var mu sync.Mutex
 	var firstErr error
 	pageLinks := make([]string, 0, len(entries))
@@ -208,10 +200,11 @@ func (p *Rule34VideoParser) parseListPage(doc *goquery.Document) (*ParseResult, 
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
+				result.Failures = append(result.Failures, err.Error())
 				if firstErr == nil {
 					firstErr = err
 				}
-				logger.Error(fmt.Sprintf("Failed to resolve video %s: %v", entry.title, err))
+				p.client.Logf("%s", fmt.Sprintf("Failed to resolve video %s: %v", entry.title, err))
 				return
 			}
 			result.Media = append(result.Media, *media)
@@ -293,7 +286,7 @@ func (p *Rule34VideoParser) Download(c *client.Client, rawURL string, filepath s
 		return err
 	}
 
-	logger.Info(fmt.Sprintf("Download link expired (403), refreshing signed link from %s", pageURL))
+	p.client.Logf("%s", fmt.Sprintf("Download link expired (403), refreshing signed link from %s", pageURL))
 	u, perr := url.Parse(pageURL)
 	if perr != nil {
 		return err

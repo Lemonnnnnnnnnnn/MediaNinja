@@ -1,13 +1,15 @@
 package cmd
 
 import (
+	"MediaNinja/core/application"
+	"MediaNinja/core/events"
+	"context"
 	"fmt"
 	"os"
-	"path/filepath"
+	"os/signal"
+	"time"
 
 	"MediaNinja/core/config"
-	"MediaNinja/core/crawler"
-	"MediaNinja/core/parsers"
 
 	"github.com/spf13/cobra"
 )
@@ -19,45 +21,16 @@ var (
 var rootCmd = &cobra.Command{
 	Use:   "MediaNinja",
 	Short: "A media crawler for websites",
-	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		// 确保输出目录存在
-		if cfg.OutputDir == "" {
-			cfg.OutputDir = "downloads"
-		}
-
-		// 转换为绝对路径
-		absPath, err := filepath.Abs(cfg.OutputDir)
-		if err != nil {
-			fmt.Printf("Error resolving output path: %v\n", err)
-			os.Exit(1)
-		}
-		cfg.OutputDir = absPath
-
-		// 创建输出目录
-		if err := os.MkdirAll(cfg.OutputDir, 0755); err != nil {
-			fmt.Printf("Error creating output directory: %v\n", err)
-			os.Exit(1)
-		}
-
-		// rule34 列表页抓取选项
-		if cfg.MaxPages < 1 {
-			cfg.MaxPages = 1
-		}
-		parsers.Rule34Options.MaxPages = cfg.MaxPages
-		parsers.Rule34Options.MaxVideos = cfg.MaxVideos
-		parsers.Rule34Options.Concurrency = cfg.Concurrency
-	},
-	Run: func(cmd *cobra.Command, args []string) {
-		c := crawler.NewCrawler(cfg)
-		if err := c.Start(cfg.URL); err != nil {
-			fmt.Printf("Crawler error: %v\n", err)
-			os.Exit(1)
-		}
+	RunE: func(cmd *cobra.Command, args []string) error {
+		_, err := application.Execute(cmd.Context(), application.Request{URL: cfg.URL, Options: *cfg}, cliObserver)
+		return err
 	},
 }
 
 func Execute() {
-	if err := rootCmd.Execute(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
@@ -77,3 +50,23 @@ func init() {
 	rootCmd.PersistentFlags().IntVarP(&cfg.MaxRetries, "max-retries", "r", 3, "Maximum number of retry attempts for downloads")
 	rootCmd.PersistentFlags().IntVarP(&cfg.RetryDelay, "retry-delay", "d", 5, "Delay between retry attempts in seconds")
 }
+
+func cliObserver(e events.Event) {
+	switch e.Type {
+	case "progress":
+		if time.Since(lastProgress[e.File]) >= time.Second || (e.Total > 0 && e.Completed == e.Total) {
+			fmt.Fprintf(os.Stderr, "%s: %d / %d %s\n", e.File, e.Completed, e.Total, e.Unit)
+			lastProgress[e.File] = time.Now()
+		}
+	case "log":
+		fmt.Println(e.Message)
+	case "analyzing", "downloading":
+		fmt.Println(e.Type)
+	case "file_completed":
+		fmt.Println("Downloaded:", e.File)
+	case "file_failed":
+		fmt.Fprintln(os.Stderr, "Failed:", e.File, e.Error)
+	}
+}
+
+var lastProgress = map[string]time.Time{}

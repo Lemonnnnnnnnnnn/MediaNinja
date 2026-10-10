@@ -3,6 +3,7 @@ package parsers
 import (
 	"MediaNinja/core/request/client"
 	"MediaNinja/core/request/downloader"
+	"fmt"
 	"net/url"
 	"strings"
 )
@@ -29,11 +30,12 @@ type FileContent struct {
 }
 
 type ParseResult struct {
-	Title   *string                `json:"title,omitempty"`
-	Content *string                `json:"content,omitempty"`
-	Media   []MediaInfo            `json:"media,omitempty"`
-	Extra   map[string]interface{} `json:"extra,omitempty"`
-	Files   []FileContent          `json:"files,omitempty"` // New field for direct file contents
+	Failures []string               `json:"failures,omitempty"`
+	Title    *string                `json:"title,omitempty"`
+	Content  *string                `json:"content,omitempty"`
+	Media    []MediaInfo            `json:"media,omitempty"`
+	Extra    map[string]interface{} `json:"extra,omitempty"`
+	Files    []FileContent          `json:"files,omitempty"` // New field for direct file contents
 }
 
 type Parser interface {
@@ -51,12 +53,12 @@ type DefaultDownloader struct{}
 
 // Download 默认的下载实现
 func (d *DefaultDownloader) Download(client *client.Client, url string, filepath string) error {
-	return downloader.NewDownloader(client, true).DownloadFile(url, filepath, nil)
+	return downloader.NewDownloader(client).DownloadFile(url, filepath, nil)
 }
 
 // DownloadWithPrefix 带前缀的下载实现
 func (d *DefaultDownloader) DownloadWithPrefix(client *client.Client, url string, filepath string, urlPrefix string) error {
-	return downloader.NewDownloader(client, true).DownloadFileWithPrefix(url, filepath, nil, urlPrefix)
+	return downloader.NewDownloader(client).DownloadFileWithPrefix(url, filepath, nil, urlPrefix)
 }
 
 func GetParser(url string, client *client.Client) Parser {
@@ -89,8 +91,14 @@ func (p *DefaultParser) GetDownloader() Downloader {
 }
 
 func (p *DefaultParser) Parse(html string) (*ParseResult, error) {
-	// 实现默认的解析逻辑
-	return &ParseResult{
-		Extra: make(map[string]interface{}),
-	}, nil
+	return nil, fmt.Errorf("unsupported website")
+}
+
+// GetParserWithOptions creates a parser with task-local options.
+func GetParserWithOptions(rawURL string, c *client.Client, options Rule34ListOptions) Parser {
+	p := GetParser(rawURL, c)
+	if rule, ok := p.(*Rule34VideoParser); ok {
+		rule.options = options
+	}
+	return p
 }

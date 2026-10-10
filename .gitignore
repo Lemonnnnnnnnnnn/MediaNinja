@@ -3,3 +3,13 @@ output
 debug
 MediaNinja
 MediaNinja.exe
+node_modules/
+.cache/
+apps/frontend/dist/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/binaries/*.exe
+apps/desktop/src-tauri/gen/
+server/ui/assets/
+server/ui/index.html
+server/ui/favicon.ico
+server/ui/fonts/

@@ -1,5 +1,7 @@
 package config
 
+import "fmt"
+
 // Config 存储所有配置信息
 type Config struct {
 	URL         string // 目标URL
@@ -22,4 +24,21 @@ func New() *Config {
 		MaxPages:    1,           // rule34 列表页默认只抓第一页
 		MaxVideos:   0,           // rule34 默认不限制视频数
 	}
+}
+
+// Validate prevents invalid worker counts and retry settings before execution.
+func (c Config) Validate() error {
+	if c.Concurrency < 1 || c.Concurrency > 64 {
+		return fmt.Errorf("concurrency must be between 1 and 64")
+	}
+	if c.MaxRetries < 1 || c.MaxRetries > 20 {
+		return fmt.Errorf("max retries must be between 1 and 20")
+	}
+	if c.RetryDelay < 0 || c.RetryDelay > 300 {
+		return fmt.Errorf("retry delay must be between 0 and 300 seconds")
+	}
+	if c.MaxPages < 1 || c.MaxVideos < 0 {
+		return fmt.Errorf("invalid list limits")
+	}
+	return nil
 }

@@ -1,20 +1,26 @@
 package crawler
 
 import (
-	"encoding/json"
-	"fmt"
 	"MediaNinja/core/config"
+	"MediaNinja/core/events"
 	"MediaNinja/core/parsers"
 	"MediaNinja/core/request/client"
 	"MediaNinja/utils/concurrent"
 	"MediaNinja/utils/format"
 	"MediaNinja/utils/io"
-	"MediaNinja/utils/logger"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sync"
+
 	"path/filepath"
 	"time"
 )
 
 type Crawler struct {
+	observer     events.Observer
+	eventMu      sync.Mutex
 	client       *client.Client
 	parser       parsers.Parser
 	limiter      *concurrent.Limiter
@@ -34,61 +40,101 @@ type CrawlMetadata struct {
 }
 
 func NewCrawler(cfg *config.Config) *Crawler {
+	copyCfg := *cfg
 	return &Crawler{
 		client:    client.NewClient(cfg.ProxyURL, cfg.MaxRetries, cfg.RetryDelay),
 		limiter:   concurrent.NewLimiter(cfg.Concurrency),
 		outputDir: cfg.OutputDir,
-		config:    cfg,
+		config:    &copyCfg,
 		ioManager: io.NewManager(cfg.OutputDir),
 	}
 
 }
 
+type FileResult struct {
+	File  string `json:"file"`
+	Error string `json:"error,omitempty"`
+}
+type Result struct {
+	Files []FileResult `json:"files"`
+}
+
+func (c *Crawler) emit(e events.Event) {
+	c.eventMu.Lock()
+	defer c.eventMu.Unlock()
+	e.Time = time.Now()
+	if c.observer != nil {
+		c.observer(e)
+	}
+}
 func (c *Crawler) Start(url string) error {
-	logger.Info("Starting crawler for URL: " + url)
-	c.parser = parsers.GetParser(url, c.client)
+	_, err := c.Run(context.Background(), url, nil)
+	return err
+}
+func (c *Crawler) Run(ctx context.Context, url string, observer events.Observer) (result Result, runErr error) {
+	if err := c.config.Validate(); err != nil {
+		return result, err
+	}
+	c.observer = observer
+	c.client.Context = ctx
+	c.client.Observer = c.emit
+	c.emit(events.Event{Type: "analyzing"})
+
+	c.parser = parsers.GetParserWithOptions(url, c.client, parsers.Rule34ListOptions{MaxPages: c.config.MaxPages, MaxVideos: c.config.MaxVideos, Concurrency: c.config.Concurrency})
 
 	html, err := c.client.Get(url, nil)
 	if err != nil {
-		return fmt.Errorf("failed to fetch URL: %w", err)
+		return result, fmt.Errorf("failed to fetch URL: %w", err)
 	}
 
-	result, err := c.parser.Parse(html)
+	resultParsed, err := c.parser.Parse(html)
 	if err != nil {
-		return fmt.Errorf("failed to parse HTML: %w", err)
+		return result, fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
-	c.currentTitle = result.Title
+	c.currentTitle = resultParsed.Title
 
-	if result.Title != nil {
-		logger.Info("Parsed title: " + *result.Title)
+	var mu sync.Mutex
+	var failures []error
+	for _, message := range resultParsed.Failures {
+		failures = append(failures, errors.New(message))
 	}
-
-	// Save metadata
-	if err := c.saveMetadata(url, result); err != nil {
-		logger.Error(fmt.Sprintf("Failed to save metadata: %v", err))
+	if len(resultParsed.Media) == 0 && len(resultParsed.Files) == 0 {
+		failures = append(failures, fmt.Errorf("no media found"))
 	}
-
-	// Handle direct file contents
-	for _, file := range result.Files {
-		subDir := "files" // Default subdirectory for direct file contents
-		if err := c.writeFile(&file, subDir); err != nil {
-			logger.Error(fmt.Sprintf("Failed to write file %s: %v", file.Filename, err))
-		} else {
-			logger.Info(fmt.Sprintf("Successfully wrote file: %s", file.Filename))
+	record := func(file string, err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		r := FileResult{File: file}
+		event := events.Event{Type: "file_completed", File: file}
+		if err != nil {
+			r.Error = err.Error()
+			failures = append(failures, err)
+			event.Type = "file_failed"
+			event.Error = r.Error
 		}
+		result.Files = append(result.Files, r)
+		c.emit(event)
 	}
-
-	// Handle media downloads
-	for _, media := range result.Media {
+	if err := c.saveMetadata(url, resultParsed); err != nil {
+		failures = append(failures, err)
+	}
+	for _, file := range resultParsed.Files {
+		record(file.Filename, c.writeFile(&file, "files"))
+	}
+	c.emit(events.Event{Type: "downloading"})
+	for _, media := range resultParsed.Media {
+		if ctx.Err() != nil {
+			break
+		}
 		mediaInfo := media
-		c.limiter.Execute(func() {
-			c.downloadMedia(&mediaInfo)
-		})
+		c.limiter.Execute(func() { record(mediaInfo.Filename, c.downloadMedia(&mediaInfo)) })
 	}
-
 	c.limiter.Wait()
-	return nil
+	if ctx.Err() != nil {
+		return result, ctx.Err()
+	}
+	return result, errors.Join(failures...)
 }
 
 // 添加获取标题目录的辅助方法
@@ -100,10 +146,9 @@ func (c *Crawler) getTitleDir() string {
 	return titleDir
 }
 
-func (c *Crawler) downloadMedia(media *parsers.MediaInfo) {
+func (c *Crawler) downloadMedia(media *parsers.MediaInfo) error {
 	if media.URL == nil {
-		logger.Error("Invalid media URL")
-		return
+		return fmt.Errorf("invalid media URL")
 	}
 
 	filename := media.Filename
@@ -123,19 +168,15 @@ func (c *Crawler) downloadMedia(media *parsers.MediaInfo) {
 
 	savePath := filepath.Join(c.outputDir, c.getTitleDir(), subDir, format.SanitizeWindowsPath(filename))
 	if err := c.ioManager.EnsureDir(savePath); err != nil {
-		logger.Error(fmt.Sprintf("Failed to create directory for %s: %v", filename, err))
-		return
+		return err
 	}
-
-	logger.Info(fmt.Sprintf("Starting download of %s", filename))
 
 	err := c.parser.GetDownloader().Download(c.client, media.URL.String(), savePath)
 	if err != nil {
-		logger.Error(fmt.Sprintf("Failed to download %s: %v", media.URL.String(), err))
-		return
+		return err
 	}
 
-	logger.Info(fmt.Sprintf("Successfully downloaded %s", filename))
+	return nil
 }
 
 // 添加保存元数据的方法
@@ -165,10 +206,7 @@ func (c *Crawler) writeFile(content *parsers.FileContent, subDir string) error {
 		return fmt.Errorf("invalid file content")
 	}
 
-	logger.Info(fmt.Sprintf("Writing file %s to subdirectory %s", content.Filename, subDir))
-
 	if content.Data == nil {
-		logger.Error(fmt.Sprintf("File content data is nil for %s", content.Filename))
 		return fmt.Errorf("file content data is nil")
 	}
 
@@ -176,22 +214,17 @@ func (c *Crawler) writeFile(content *parsers.FileContent, subDir string) error {
 	var dataToWrite interface{} = content.Data
 	switch v := content.Data.(type) {
 	case string:
-		logger.Info(fmt.Sprintf("Content is string type, length: %d", len(v)))
 		dataToWrite = v
 	case []byte:
-		logger.Info(fmt.Sprintf("Content is []byte type, length: %d", len(v)))
 		dataToWrite = v
 	default:
-		logger.Error(fmt.Sprintf("Unexpected content data type: %T", content.Data))
 		return fmt.Errorf("unexpected content data type: %T", content.Data)
 	}
 
 	err := c.ioManager.WriteFile(dataToWrite, content.Filename, subDir, c.getTitleDir())
 	if err != nil {
-		logger.Error(fmt.Sprintf("Failed to write file %s: %v", content.Filename, err))
 		return err
 	}
 
-	logger.Info(fmt.Sprintf("Successfully wrote file %s", content.Filename))
 	return nil
 }

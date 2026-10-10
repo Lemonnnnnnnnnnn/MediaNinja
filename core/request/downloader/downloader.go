@@ -1,184 +1,149 @@
 package downloader
 
 import (
+	"MediaNinja/core/events"
+	"MediaNinja/core/request/types"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"path"
+	filepathpkg "path/filepath"
 	"strings"
 	"time"
-
-	"MediaNinja/core/request/types"
 )
 
 type RequestOption = types.RequestOption
 type ClientInterface = types.ClientInterface
-
 type Downloader struct {
-	client ClientInterface
-
+	client     ClientInterface
 	maxRetries int
 	retryDelay time.Duration
-
-	showProgress bool
 }
 
-func NewDownloader(client ClientInterface, showProgress bool) *Downloader {
-	return &Downloader{
-		client:       client,
-		maxRetries:   client.GetMaxRetries(),
-		retryDelay:   client.GetRetryDelay(),
-		showProgress: showProgress,
-	}
+func NewDownloader(client ClientInterface) *Downloader {
+	return &Downloader{client: client, maxRetries: client.GetMaxRetries(), retryDelay: client.GetRetryDelay()}
 }
-
-// DownloadFile downloads a file from URL to the specified filepath
-func (d *Downloader) DownloadFile(url string, filepath string, opts *RequestOption) error {
-	if err := os.MkdirAll(path.Dir(filepath), 0755); err != nil {
-		return fmt.Errorf("failed to create directory: %w", err)
+func (d *Downloader) DownloadFile(url, filepath string, opts *RequestOption) error {
+	return d.DownloadFileWithPrefix(url, filepath, opts, "")
+}
+func (d *Downloader) DownloadFileWithPrefix(url, filepath string, opts *RequestOption, prefix string) error {
+	if err := os.MkdirAll(filepathpkg.Dir(filepath), 0755); err != nil {
+		return err
 	}
-
-	fmt.Println("DownloadFile", url)
-	// 检查是否是 M3U8 文件
 	if strings.Contains(strings.ToLower(url), ".m3u8") {
-		fmt.Println("DownloadFile is M3U8")
-		// 使用新的 M3U8 下载器，传入 showProgress 参数
-		m3u8Downloader := NewM3U8Downloader(d.client, filepath, opts, d.showProgress)
-		return m3u8Downloader.DownloadFromURL(url)
+		return NewM3U8DownloaderWithPrefix(d.client, filepath, opts, prefix).DownloadFromURL(url)
 	}
-
 	return d.downloadRegularFile(url, filepath, opts)
 }
-
-// DownloadFileWithPrefix downloads a file from URL to the specified filepath with URL prefix support
-func (d *Downloader) DownloadFileWithPrefix(url string, filepath string, opts *RequestOption, urlPrefix string) error {
-	if err := os.MkdirAll(path.Dir(filepath), 0755); err != nil {
-		return fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	fmt.Println("DownloadFileWithPrefix", url, "prefix:", urlPrefix)
-	// 检查是否是 M3U8 文件
-	if strings.Contains(strings.ToLower(url), ".m3u8") {
-		fmt.Println("DownloadFileWithPrefix is M3U8")
-		// 使用带前缀的 M3U8 下载器
-		m3u8Downloader := NewM3U8DownloaderWithPrefix(d.client, filepath, opts, d.showProgress, urlPrefix)
-		return m3u8Downloader.DownloadFromURL(url)
-	}
-
-	return d.downloadRegularFile(url, filepath, opts)
-}
-
-func (d *Downloader) downloadRegularFile(url string, filepath string, opts *RequestOption) error {
-	var attempt int
-	for attempt = 0; attempt < d.maxRetries; attempt++ {
+func (d *Downloader) downloadRegularFile(url, filepath string, opts *RequestOption) error {
+	var lastErr error
+	for attempt := 0; attempt < d.maxRetries; attempt++ {
 		if attempt > 0 {
-			time.Sleep(d.retryDelay)
-		}
-
-		// Get file info for resume download
-		var startPos int64 = 0
-		fi, err := os.Stat(filepath)
-		if err == nil {
-			startPos = fi.Size()
-		}
-
-		// Prepare headers for resume
-		var headers map[string]string
-		if startPos > 0 {
-			headers = map[string]string{
-				"Range": fmt.Sprintf("bytes=%d-", startPos),
+			if err := waitRetry(d.client, d.retryDelay); err != nil {
+				return err
 			}
 		}
-
-		// Get response stream
-		resp, err := d.client.GetStream("GET", url, opts, headers)
+		if err := downloadContext(d.client).Err(); err != nil {
+			return err
+		}
+		var start int64
+		if info, err := os.Stat(filepath); err == nil {
+			start = info.Size()
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		headers := map[string]string{}
+		if start > 0 {
+			headers["Range"] = fmt.Sprintf("bytes=%d-", start)
+		}
+		response, err := d.client.GetStream("GET", url, opts, headers)
 		if err != nil {
-			if attempt < d.maxRetries-1 {
-				fmt.Printf("Download attempt %d failed: %v, retrying...\n", attempt+1, err)
-				continue
-			}
-			return fmt.Errorf("failed to send request after %d attempts: %w", d.maxRetries, err)
+			lastErr = err
+			continue
 		}
-		defer resp.Body.Close()
-
-		// Check response status
-		switch resp.StatusCode {
+		switch response.StatusCode {
 		case http.StatusOK:
-			startPos = 0
+			start = 0
 		case http.StatusPartialContent:
-			// Server supports resume
-		case http.StatusRequestedRangeNotSatisfiable:
-			return nil
-		default:
-			if attempt < d.maxRetries-1 {
-				fmt.Printf("Download attempt %d failed with status code %d, retrying...\n", attempt+1, resp.StatusCode)
-				continue
+			var offset, end, total int64
+			_, err := fmt.Sscanf(response.Header.Get("Content-Range"), "bytes %d-%d/%d", &offset, &end, &total)
+			if err != nil || offset != start || end < offset || total <= end {
+				response.Body.Close()
+				return fmt.Errorf("invalid Content-Range for resume")
 			}
-			return fmt.Errorf("unexpected status code after %d attempts: %d", d.maxRetries, resp.StatusCode)
+		case http.StatusRequestedRangeNotSatisfiable:
+			var total int64
+			_, err := fmt.Sscanf(response.Header.Get("Content-Range"), "bytes */%d", &total)
+			response.Body.Close()
+			if err == nil && start > 0 && start == total {
+				report(d.client, events.Event{Type: "progress", File: filepath, Completed: start, Total: total, Unit: "bytes"})
+				return nil
+			}
+			return fmt.Errorf("range not satisfiable; completion cannot be verified")
+		default:
+			lastErr = fmt.Errorf("unexpected HTTP status: %d", response.StatusCode)
+			response.Body.Close()
+			continue
 		}
-
-		if success := d.processDownload(resp, filepath, startPos); success {
+		lastErr = d.processDownload(response, filepath, start)
+		response.Body.Close()
+		if lastErr == nil {
 			return nil
 		}
 	}
-
-	return fmt.Errorf("download failed after %d attempts", d.maxRetries)
+	return fmt.Errorf("download failed after %d attempts: %w", d.maxRetries, lastErr)
 }
-
-func (d *Downloader) processDownload(resp *http.Response, filepath string, startPos int64) bool {
-	// Get file total size
-	contentLength := resp.ContentLength
-	if contentLength <= 0 {
-		return false
+func (d *Downloader) processDownload(response *http.Response, filepath string, start int64) error {
+	total := int64(0)
+	if response.ContentLength >= 0 {
+		total = start + response.ContentLength
 	}
-	totalSize := startPos + contentLength
-
-	// Open or create file
 	flags := os.O_CREATE | os.O_WRONLY
-	if startPos > 0 {
+	if start > 0 {
 		flags |= os.O_APPEND
+	} else {
+		flags |= os.O_TRUNC
 	}
 	file, err := os.OpenFile(filepath, flags, 0644)
 	if err != nil {
-		return false
+		return err
 	}
 	defer file.Close()
-
-	// Create progress tracker only if showProgress is true
-	var progress *DownloadProgress
-	if d.showProgress {
-		progress = NewDownloadProgress(path.Base(filepath), totalSize, startPos)
+	completed := start
+	emit := func() {
+		report(d.client, events.Event{Type: "progress", File: filepath, Completed: completed, Total: total, Unit: "bytes"})
 	}
-
-	// Use buffered reading for better performance
-	bufSize := 32 * 1024 // 32KB buffer
-	buf := make([]byte, bufSize)
-
+	emit()
+	last := time.Now()
+	buffer := make([]byte, 32*1024)
 	for {
-		n, err := resp.Body.Read(buf)
+		if err := downloadContext(d.client).Err(); err != nil {
+			return err
+		}
+		n, readErr := response.Body.Read(buffer)
 		if n > 0 {
-			if _, werr := file.Write(buf[:n]); werr != nil {
-				if progress != nil {
-					progress.Fail(werr)
-				}
-				return false
+			written, err := file.Write(buffer[:n])
+			if err != nil {
+				return err
 			}
-			if progress != nil {
-				progress.Update(int64(n))
+			if written != n {
+				return io.ErrShortWrite
 			}
+			completed += int64(n)
 		}
-		if err == io.EOF {
-			if progress != nil {
-				progress.Success()
-			}
-			return true
+		if time.Since(last) >= 200*time.Millisecond {
+			emit()
+			last = time.Now()
 		}
-		if err != nil {
-			if progress != nil {
-				progress.Fail(err)
+		if readErr == io.EOF {
+			emit()
+			if response.ContentLength >= 0 && completed != total {
+				return io.ErrUnexpectedEOF
 			}
-			return false
+			return file.Close()
+		}
+		if readErr != nil {
+			return readErr
 		}
 	}
 }
