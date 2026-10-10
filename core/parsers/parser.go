@@ -72,7 +72,7 @@ func GetParser(url string, client *client.Client) Parser {
 	case strings.Contains(url, "pornhub.com"):
 		return NewPornhubParser(client)
 	case strings.Contains(url, "rule34video.com"):
-		return &Rule34VideoParser{}
+		return NewRule34VideoParser(client, url)
 	case strings.Contains(url, "xifanacg"):
 		return NewXifanacgParser(client)
 	default:
