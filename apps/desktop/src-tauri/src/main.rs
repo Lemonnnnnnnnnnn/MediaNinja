@@ -25,7 +25,7 @@ async fn select_output_directory(
     let path = app
         .dialog()
         .file()
-        .set_title("选择 MediaNinja 下载目录")
+        .set_title("Choose a MediaNinja download folder")
         .blocking_pick_folder();
     path.map(|path| {
         path.into_path()
@@ -43,7 +43,7 @@ fn open_output_directory(
     verify(&window, &backend)?;
     let directory = PathBuf::from(path);
     if !directory.is_absolute() || !directory.is_dir() {
-        return Err("输出目录不存在".into());
+        return Err("The output directory does not exist.".into());
     }
     std::process::Command::new("explorer.exe")
         .arg(directory)
@@ -116,13 +116,14 @@ fn main() {
                     let _ = hide_window.hide();
                 }
             });
-            let open = MenuItem::with_id(app, "open", "打开 MediaNinja", true, None::<&str>)?;
-            let exit = MenuItem::with_id(app, "quit", "退出并停止任务", true, None::<&str>)?;
+            let open = MenuItem::with_id(app, "open", "Open MediaNinja", true, None::<&str>)?;
+            let exit =
+                MenuItem::with_id(app, "quit", "Quit and stop downloads", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &exit])?;
             let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))?;
             TrayIconBuilder::new()
                 .icon(icon)
-                .tooltip("MediaNinja · 后台下载")
+                .tooltip("MediaNinja · Downloads running in the background")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
@@ -150,7 +151,7 @@ fn main() {
                     show_main(&handle);
                     handle
                         .dialog()
-                        .message("下载服务已停止，请退出并重新打开 MediaNinja。")
+                        .message("下载服务已停止，请退出并重新Open MediaNinja。")
                         .title("MediaNinja")
                         .show(|_| {});
                     break;

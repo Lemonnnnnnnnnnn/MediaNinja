@@ -45,3 +45,7 @@ pnpm test:sidecar
 ```
 
 sidecar 测试检查就绪协议、会话、API、嵌入的 React 资源以及父进程关闭后的退出行为，不访问真实媒体网站。
+
+界面使用英语和默认暗色的 neobrutalism 功能工作台：新建下载、目录与引擎参数、任务队列共同占据首屏，不使用宣传主视觉。队列支持 Active、This session、Failed 筛选。配置与会话历史通过浮动面板打开，支持 Escape 关闭、键盘焦点约束和窄屏排列。配置中心按存储、下载引擎、解析器独立分组；Rule34 提供列表页数和视频上限，其他解析器仍使用内置默认值。
+
+Paper Mono 变量字体从 https://paper.design/mono/download 获取，保存在 `apps/frontend/public/fonts`，随 Web 和桌面成品一起离线分发。SIL OFL 1.1 许可证一并保留；界面运行时无需外部字体 CDN。

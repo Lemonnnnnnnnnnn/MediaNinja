@@ -23,7 +23,7 @@ export class MediaNinjaClient {
     const response = await fetch(`${this.baseUrl}${path}`, { credentials: 'same-origin', ...init })
     if (!response.ok) {
       const body = await response.json().catch(() => null) as { error?: string } | null
-      throw new ApiError(response.status, body?.error ?? `请求失败 (${response.status})`)
+      throw new ApiError(response.status, body?.error ?? `Request failed (${response.status})`)
     }
     return response.status === 204 ? undefined as T : response.json() as Promise<T>
   }

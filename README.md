@@ -1,114 +1,159 @@
-## MediaNinja
+# MediaNinja
 
-### pre-requisites
+MediaNinja 是一个媒体下载工具，提供 CLI、本地 Web 工作台和 Windows 桌面端。三端共用 Go 核心；Web 与桌面共用 React 前端，桌面通过 Tauri 2 管理窗口、托盘和本地 Go 服务。
 
-- ffmpeg
-- Go 1.23+（构建）
-- Node.js 22.12+、pnpm 10.18.0（构建前端；运行成品不需要）
+工作台支持创建下载任务、查看进度、取消任务、会话历史，以及输出目录、代理、下载引擎和解析器配置。界面使用英语，默认暗色主题。
 
-### Build
+## 开发环境
 
-```bash
+以下命令在仓库根目录执行，以 Windows PowerShell 为例。
+
+| 工具 | 要求 | 用途 |
+| --- | --- | --- |
+| Go | 1.23+ | CLI、HTTP 服务和下载核心 |
+| Node.js | 22.12+ | 前端开发与构建 |
+| pnpm | 10.18.0 | 管理前端和桌面 workspace |
+| ffmpeg | 在 PATH 中，或放在 Go 可执行文件旁 | M3U8 合并；不随安装包分发 |
+
+桌面开发和构建还需要 Rust MSVC 工具链、Visual Studio C++ Build Tools、Windows SDK 和 WebView2 运行时。当前桌面版本以 Windows x64 为目标。
+
+安装前端与桌面工具依赖：
+
+```powershell
 corepack enable
 pnpm install
+```
+
+仅开发 CLI 时，不需要 Node.js、pnpm 或 Rust。
+
+## Dev
+
+### 本地 Web
+
+```powershell
+pnpm dev
+```
+
+该命令编译并启动 Go 服务，再启动 Vite。打开 <http://127.0.0.1:5173>，前端通过 Vite 代理访问 Go API。
+
+React 页面修改支持热更新；修改 Go 代码后需要停止并重新运行 `pnpm dev`。按 Ctrl+C 会停止前端和 Go 服务，并取消运行中的下载任务。
+
+也可以分别启动后端和前端，在两个终端中执行：
+
+```powershell
+# 终端 1：Go API
+go run . serve --listen 127.0.0.1:43189
+```
+
+```powershell
+# 终端 2：Vite，默认代理到上述端口
+pnpm dev:web
+```
+
+如果后端使用其他地址，在启动 Vite 前设置 `$env:MEDIANINJA_BACKEND_URL = 'http://127.0.0.1:你的端口'`。
+
+### Windows 桌面端
+
+```powershell
+pnpm desktop:dev
+```
+
+命令会构建前端与 Go sidecar，再启动 Tauri。桌面壳加载同一套 React 页面，并负责启动、停止本地 Go 子进程。
+
+当前桌面开发加载前端构建目录：
+
+- 修改前端后，执行 `pnpm build:frontend`，在桌面窗口按 Ctrl+R 刷新。
+- 修改 Go 后，执行 `pnpm build:sidecar`，再重启桌面开发进程。
+- 需要频繁调整页面时，使用 `pnpm dev` 获得 Vite 热更新，随后在桌面窗口验证原生功能。
+
+### CLI
+
+```powershell
+go run . --help
+go run . -u '<目标页面 URL>' -o downloads
+```
+
+CLI 直接调用 Go 核心，无需先启动 HTTP 服务。
+
+## Build 与分发
+
+### 本地 Web 可执行文件
+
+```powershell
 pnpm build:web
 ```
 
-### Usage
+该命令构建 React，将资源复制到 `server/ui`，再通过 `go:embed` 编入根目录的 `MediaNinja.exe`。分发这个文件即可，用户无需安装 Go 或 Node.js。
 
-下载单个页面（视频页 / 图片页等）：
-
-```bash
-./MediaNinja.exe -u <目标URL> [--proxy http://127.0.0.1:7890] [-c 5] [-o downloads]
-```
-
-### rule34video 批量下载
-
-按创作者名或搜索关键词批量下载 rule34video.com 的视频。
-优先使用作者页（`/models/<name>/`，支持翻页），作者页不存在时自动回退到搜索页。
-
-```bash
-# 每个作者下载前 5 个视频（最高清晰度）
-./MediaNinja.exe rule34 -n "juicyneko,mackg4,brutalisk" --limit 5
-
-# 全量下载（不限制数量），作者页抓前 3 页
-./MediaNinja.exe rule34 -n "juicyneko,mackg4" --pages 3
-
-# 常用参数
-#   -n, --names   逗号分隔的作者名/关键词（必填）
-#       --pages   每个名字最多抓取的列表页数（默认 1；仅作者页支持翻页）
-#       --limit   每个名字最多下载的视频数（默认 0 = 不限制）
-#   -p, --proxy   代理地址（可选）
-#   -c, --concurrency  并发下载数（默认 5）
-#   -o, --output  输出目录（默认 downloads）
-```
-
-输出结构：`downloads/<名字>/videos/<标题> [<视频ID>].mp4`，
-每个名字目录下有 `metadata.json` 记录来源与下载链接。
-重复执行时已完成的视频会自动跳过（断点续传/秒传检测），可随时调大 `--limit`/`--pages` 续下。
-
-
-### 本地 Web 控制台
-
-构建后双击 `MediaNinja.exe`（无参数启动）会开启本机 HTTP 服务，并打开默认浏览器。前端资源已经嵌入程序，不需要安装 Node.js。
-
-也可以显式启动：
+双击 `MediaNinja.exe` 会启动本地服务并打开默认浏览器，也可以显式启动或指定端口：
 
 ```powershell
 .\MediaNinja.exe serve --open
 .\MediaNinja.exe serve --listen 127.0.0.1:8080 -o downloads
 ```
 
-默认监听 `127.0.0.1:0`，由系统分配空闲端口。命令会打印访问地址与本次运行的 API token。
+默认使用系统分配的空闲端口，只监听本机 loopback 地址。关闭浏览器后任务仍会继续；在服务终端按 Ctrl+C 退出。
 
-- 页面支持 URL 下载和 Rule34 作者 / 关键词批量下载，以及进度查看、任务取消。
-- 一个任务执行队列，任务内按 `--concurrency` 并发下载；配置中心可以修改目录、代理、并发和重试设置，只影响新任务。
-- 关闭浏览器不会停止任务；在终端按 Ctrl+C 停止服务会取消任务。
-- 任务历史保存在内存中，重启后清空。普通文件和 M3U8 的未完成数据保留在磁盘，可以重新提交任务续传。
-- 当前只允许绑定 loopback IP，适合本地使用和桌面壳接入。远程部署的鉴权与多用户隔离尚未实现。
-- M3U8 合并仍需 ffmpeg：可以安装到 PATH，或将 `ffmpeg.exe` 放在 `MediaNinja.exe` 旁边。
-
-CLI 命令仍可直接调用 core，不需要先启动服务。CLI 执行时按 Ctrl+C 可以取消请求、重试等待与 ffmpeg 合并；部分文件失败会返回非零退出码。
-
-### HTTP API
-
-浏览器访问页面后使用 HttpOnly 会话 Cookie；其他客户端使用服务启动时打印的 token：
+### Windows 桌面安装包
 
 ```powershell
-$headers = @{ Authorization = 'Bearer <启动时打印的 token>' }
-$body = @{ url = 'https://telegra.ph/<page>' } | ConvertTo-Json
-Invoke-RestMethod -Uri http://127.0.0.1:8080/api/tasks -Method Post -Headers $headers -ContentType application/json -Body $body
+pnpm desktop:build
 ```
 
-| 方法 | 路径 | 用途 |
-| --- | --- | --- |
-| GET | `/api/session` | 初始化同源浏览器会话 |
-| GET | `/api/config` | 当前服务配置 |
-| PUT | `/api/config` | 校验并更新会话配置 |
-| POST | `/api/tasks` | 创建任务，返回 202 和任务快照 |
-| GET | `/api/tasks` | 查询任务列表 |
-| GET | `/api/tasks/{id}` | 查询任务详情 |
-| POST | `/api/tasks/{id}/cancel` | 取消任务 |
-| GET | `/api/events` | SSE：`tasks` 事件携带完整列表快照 |
+该命令自动构建前端、Go sidecar、Tauri 程序和 NSIS 安装包。分发以下目录中的 `*-setup.exe`：
 
-提交请求使用 `url` 或 `names` 二选一，`options` 可省略；省略的设置继承服务默认值。目前配置字段使用 Go 字段名，如 `Concurrency`、`ProxyURL`、`MaxPages`、`MaxVideos`。`OutputDir` 通过配置 API 修改；提交任务不能覆盖输出目录。每个任务保留提交时的配置快照。
+```text
+apps/desktop/src-tauri/target/release/bundle/nsis/
+```
 
-SSE 建立连接时立即返回快照，随后每秒更新；重连和页面刷新会重新读取当前状态，不依赖重放历史事件。任务状态为 `queued`、`running`、`canceling`、`completed`、`failed`、`canceled`。
+安装包包含桌面程序与 Go sidecar；用户无需安装 Go、Node.js 或 Rust。WebView2 缺失时由安装器引导安装。当前安装包未签名，ffmpeg 需要另行提供。
 
-### 开发与测试
+桌面窗口关闭时隐藏到托盘；使用托盘菜单的 Quit 退出程序并停止下载服务。
+
+### 仅构建 CLI
 
 ```powershell
+go build -o MediaNinja.exe .
+.\MediaNinja.exe -u '<目标页面 URL>' -o downloads
+```
+
+直接 `go build` 不会构建或更新前端资源。需要可分发的本地 Web 程序时，使用 `pnpm build:web`。
+
+### 辅助构建命令
+
+| 命令 | 产物 |
+| --- | --- |
+| `pnpm build:frontend` | `apps/frontend/dist`，仅构建前端 |
+| `pnpm build:sidecar` | 嵌入前端的 Windows Go sidecar，输出到 `apps/desktop/src-tauri/binaries`；需要 Rust MSVC 工具链 |
+
+## 检查
+
+```powershell
+pnpm typecheck
 go test ./...
 go vet ./...
-corepack enable
-pnpm install
-pnpm build:web
 ```
 
-默认测试使用本地 HTTP 测试服务，不访问真实媒体网站。原有依赖外部站点及本机 `7890` 代理的测试改为显式运行：
+默认 Go 测试使用本地测试服务，不访问真实媒体网站。桌面环境还可以验证 sidecar 的启动协议、API、嵌入资源和退出行为：
 
 ```powershell
-go test -tags integration ./core/request/client
+pnpm build:sidecar
+pnpm test:sidecar
 ```
 
-架构与后续适配边界见 [docs/architecture.md](docs/architecture.md)。Web 与 Windows 桌面端共用 Vite + React + TypeScript + Tailwind CSS 前端，桌面壳使用 Tauri 2 与 Go sidecar。开发、构建和分发见 [docs/desktop.md](docs/desktop.md)。
+## 项目结构
+
+| 目录 | 职责 |
+| --- | --- |
+| `core` | 解析、请求、下载等 Go 核心能力 |
+| `cmd` | CLI 入口与命令适配 |
+| `server` | 本地 HTTP API、任务队列和前端资源嵌入 |
+| `apps/frontend` | Web 与桌面共用的 Vite、React、TypeScript、Tailwind CSS 前端 |
+| `apps/desktop` | Tauri 2 桌面壳与原生能力 |
+| `packages/api-client` | HTTP 客户端、类型和 SSE 订阅 |
+| `packages/platform` | 浏览器与桌面的平台能力适配 |
+| `scripts` | 开发启动、构建和 sidecar 验证脚本 |
+
+当前配置与任务历史保存在会话内存中，重启后恢复默认配置并清空历史。配置修改只影响新任务。服务面向本机使用，暂不支持远程多用户部署。
+
+架构边界见 [架构说明](docs/architecture.md)，桌面实现与开发细节见 [Web 与 Windows 桌面开发](docs/desktop.md)。

@@ -32,7 +32,7 @@
       "nsis": {
         "displayLanguageSelector": false,
         "languages": [
-          "SimpChinese"
+          "English"
         ],
         "installMode": "currentUser"
       }

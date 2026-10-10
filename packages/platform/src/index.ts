@@ -8,7 +8,7 @@ export interface HostCapabilities {
 const browserHost: HostCapabilities = {
   kind: 'browser', canSelectDirectory: false,
   selectDirectory: async () => null,
-  openOutputDirectory: async () => { throw new Error('请在文件管理器中打开输出目录') },
+  openOutputDirectory: async () => { throw new Error('Open the output directory in your file manager.') },
   notify: async () => {},
 }
 export function createHost(): HostCapabilities {
