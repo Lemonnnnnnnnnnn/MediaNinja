@@ -13,15 +13,22 @@ import (
 
 var rule34Names string
 
-// rule34TargetURL 优先使用作者页（支持路径翻页），不存在（404）则回退到搜索页
+// rule34TargetURL 优先使用作者页（支持路径翻页）；仅在明确返回 404 时回退到搜索页，
+// 网络抖动（EOF 等）时重试预检，避免静默降级导致抓取到不同的视频集合
 func rule34TargetURL(c *client.Client, name string) string {
 	modelsURL := "https://rule34video.com/models/" + name + "/"
 
-	resp, err := c.GetStream("GET", modelsURL, nil, nil)
-	if err == nil {
+	for attempt := 0; attempt < 2; attempt++ {
+		resp, err := c.GetStream("GET", modelsURL, nil, nil)
+		if err != nil {
+			continue
+		}
 		resp.Body.Close()
 		if resp.StatusCode == 200 {
 			return modelsURL
+		}
+		if resp.StatusCode == 404 {
+			break
 		}
 	}
 	return "https://rule34video.com/search/" + name + "/"
