@@ -13,3 +13,7 @@ server/ui/assets/
 server/ui/index.html
 server/ui/favicon.ico
 server/ui/fonts/
+ffmpeg.exe
+licenses/ffmpeg/
+apps/desktop/src-tauri/resources/ffmpeg/
+release/

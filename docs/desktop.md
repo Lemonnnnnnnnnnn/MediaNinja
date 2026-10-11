@@ -10,7 +10,7 @@
 | `packages/platform` | HostCapabilities；浏览器实现与 Tauri 原生桥接 |
 | `core` / `server` | Go 用例、下载任务与本地 HTTP 服务 |
 
-开发需要 Go 1.23+、Node.js 22.12+（建议 22 LTS）以及 pnpm 10.18.0。桌面开发还需要 Rust MSVC 工具链、Visual Studio C++ Build Tools、Windows SDK 和 WebView2。
+开发需要 Go 1.23+、Node.js 22.12+（建议 22 LTS）以及 pnpm 10.18.0。Windows 成品构建还需要 Git for Windows（包含 Git Bash），以编译固定版本的 ffmpeg；工具链自动下载并校验。桌面开发还需要 Rust MSVC 工具链、Visual Studio C++ Build Tools、Windows SDK 和 WebView2。
 
 ```powershell
 corepack enable
@@ -30,7 +30,7 @@ pnpm desktop:build
 
 `build:web` 将 React 构建结果复制到 `server/ui`，通过 go:embed 编入根目录的 `MediaNinja.exe`。终端用户无需 Node.js。双击 exe 打开本地 Web，也可继续使用原有 CLI 命令。直接 `go build` 不会生成前端资源，适合 CLI 开发；没有生成资源时 Web 页面提示先构建前端。
 
-`desktop:build` 自动生成 Go sidecar 和 Windows NSIS 安装包，位于 `apps/desktop/src-tauri/target/release/bundle/nsis/`。安装包包含桌面 exe 与 Go sidecar。未安装 WebView2 的机器会由安装器引导获取运行时。当前安装包未签名。M3U8 合并还需要 ffmpeg，可放到 PATH 或 Go sidecar 旁边；未打包 ffmpeg。
+`desktop:build` 自动生成 Go sidecar 和 Windows NSIS 安装包，位于 `apps/desktop/src-tauri/target/release/bundle/nsis/`。安装包包含桌面 exe 与 Go sidecar。未安装 WebView2 的机器会由安装器引导获取运行时。当前安装包未签名。安装包同时包含 ffmpeg、对应源码和许可证，M3U8 合并无需额外安装；Go 优先使用随包提供的版本。
 
 桌面关闭按钮隐藏到托盘；托盘菜单可以重新打开窗口，或退出并停止任务。退出时关闭 Go 标准输入，Go 收到 EOF 后取消任务并关闭 HTTP 服务；异常结束桌面进程也会断开标准输入。服务仅监听 loopback 随机端口，页面使用 HttpOnly 会话 Cookie。原生命令同时受 Tauri capability 和 Rust 的精确 origin 校验约束。
 
@@ -49,3 +49,7 @@ sidecar 测试检查就绪协议、会话、API、嵌入的 React 资源以及�
 界面使用英语和默认暗色的 neobrutalism 功能工作台：新建下载、目录与引擎参数、任务队列共同占据首屏，不使用宣传主视觉。队列支持 Active、This session、Failed 筛选。配置与会话历史通过浮动面板打开，支持 Escape 关闭、键盘焦点约束和窄屏排列。配置中心按存储、下载引擎、解析器独立分组；Rule34 提供列表页数和视频上限，其他解析器仍使用内置默认值。
 
 Paper Mono 变量字体从 https://paper.design/mono/download 获取，保存在 `apps/frontend/public/fonts`，随 Web 和桌面成品一起离线分发。SIL OFL 1.1 许可证一并保留；界面运行时无需外部字体 CDN。
+
+工作台通过 hash 路由区分 `#/downloads` 单页下载与 `#/batch` 批量下载。主页面只接受页面 URL；Batch 页面单独维护创作者/关键词输入和解析器限制。两页分别保留输入草稿并展示对应类型的任务，但共用 Go 任务队列，History 汇总整个会话。
+
+Settings 提供 General 与 Parsers 两个 Tab；目录、代理和下载引擎归入 General，解析器选项归入 Parsers。两组共用配置草稿，保存时提交全部配置。浮动面板关闭后返回原页面，Batch 页的限制编辑按钮可以直接打开 `#/batch/settings/parsers`。Tab 支持方向键、Home、End 切换。

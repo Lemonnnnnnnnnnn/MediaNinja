@@ -3,6 +3,7 @@ package cmd
 import (
 	"MediaNinja/core/application"
 	"MediaNinja/core/events"
+	"MediaNinja/internal/buildinfo"
 	"context"
 	"fmt"
 	"os"
@@ -19,8 +20,9 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "MediaNinja",
-	Short: "A media crawler for websites",
+	Use:     "MediaNinja",
+	Short:   "A media crawler for websites",
+	Version: buildinfo.String(),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		_, err := application.Execute(cmd.Context(), application.Request{URL: cfg.URL, Options: *cfg}, cliObserver)
 		return err

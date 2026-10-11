@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createInterface } from 'node:readline'
@@ -8,7 +8,8 @@ const executable = resolve(root, '.cache', process.platform === 'win32' ? 'media
 mkdirSync(dirname(executable), { recursive: true })
 const build = spawnSync('go', ['build', '-o', executable, '.'], { cwd: root, stdio: 'inherit' })
 if (build.status !== 0) process.exit(build.status ?? 1)
-const backend = spawn(executable, ['serve', '--desktop', '--listen', '127.0.0.1:0'], { cwd: root, stdio: ['pipe', 'pipe', 'inherit'] })
+const bundledFFmpeg = resolve(root, '.cache/ffmpeg/windows-x64/ffmpeg.exe')
+const backend = spawn(executable, ['serve', '--desktop', '--listen', '127.0.0.1:0'], { cwd: root, stdio: ['pipe', 'pipe', 'inherit'], env: { ...process.env, ...(process.platform === 'win32' && existsSync(bundledFFmpeg) && !process.env.MEDIANINJA_FFMPEG ? { MEDIANINJA_FFMPEG: bundledFFmpeg } : {}) } })
 let frontend
 let stopping = false
 function stop(code = 0) {
