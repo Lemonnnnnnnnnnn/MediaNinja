@@ -42,10 +42,16 @@ svg { flex-shrink: 0; }
 .station-title h2 { margin: 0; font-size: 12px; font-weight: 800; }
 .station-title > span { font-size: 11px; }
 .capture-box { display: grid; padding: 22px 18px; }
-.mode-switch { display: flex; border: 1px solid #747d5a; margin-bottom: 26px; }
-.mode-switch button { flex: 1; padding: 11px 7px; font-size: 10px; color: #c0c7ad; background: #171a12; }
-.mode-switch button + button { border-left: 1px solid #747d5a; }
-.mode-switch button[aria-pressed="true"] { color: var(--ink); background: #c6d598; font-weight: 700; }
+.workspace-pages { display: flex; flex-wrap: wrap; gap: 10px; }
+.workspace-pages a { padding: 10px 13px; border: 1px solid #697156; color: #a8b196; font-size: 10px; }
+.workspace-pages a[aria-current="page"] { color: var(--ink); background: var(--acid); border-color: var(--acid); box-shadow: 3px 3px 0 #4d5830; font-weight: 700; }
+.batch-options { border-top: 1px solid #5e6949; padding: 18px; background: #252a1b; }
+.batch-options dl { display: grid; gap: 10px; margin: 16px 0; }
+.batch-options dl > div { display: flex; justify-content: space-between; gap: 14px; font-size: 11px; }
+.batch-options dt, .batch-options p { color: #a8b196; }
+.batch-options dd { margin: 0; }
+.batch-options p { font-size: 10px; line-height: 1.7; margin: 0; }
+.batch-options .snapshot-heading button { font-size: 9px; }
 .target-label { font-size: 10px; letter-spacing: .5px; margin-bottom: 10px; }
 .capture-box [data-slot="input"] { height: 46px; font-size: 13px; }
 .input-hint { font-size: 10px; color: #acb59a; line-height: 1.7; margin: 10px 0 19px; }
@@ -122,6 +128,10 @@ progress::-moz-progress-bar { background: var(--acid); }
 .panel-bottom { display: flex; justify-content: space-between; gap: 15px; padding: 12px 24px; border-top: 1px solid #555b45; font-size: 8px; letter-spacing: .4px; color: #a8af99; flex-shrink: 0; }
 .settings-form { display: grid; gap: 24px; }
 .settings-form .panel-note { margin: 0; }
+.settings-tabs { display: flex; gap: 8px; border-bottom: 1px solid #555e42; padding-bottom: 14px; }
+.settings-tabs button { border: 1px solid #697156; color: #b5bbaa; padding: 11px 18px; font-size: 11px; }
+.settings-tabs button[aria-selected="true"] { color: var(--ink); background: var(--acid); border-color: var(--acid); font-weight: 700; box-shadow: 3px 3px 0 #4d5830; }
+.settings-form [role="tabpanel"]:not([hidden]) { display: grid; gap: 24px; }
 .settings-unit { border: 1px solid #555e42; padding: 24px; display: grid; gap: 23px; }
 .unit-heading > span { color: var(--acid); font-size: 9px; letter-spacing: 1px; }
 .unit-heading h3 { font-size: 17px; letter-spacing: -.5px; margin: 8px 0 0; font-weight: 700; }

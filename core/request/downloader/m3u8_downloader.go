@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/grafov/m3u8"
@@ -211,20 +210,9 @@ func (m *M3U8Downloader) convertToMP4(inputFile, outputFile string) error {
 	}
 
 	// 检查 ffmpeg 是否可用
-	binary, err := exec.LookPath("ffmpeg")
+	binary, err := findFFmpeg()
 	if err != nil {
-		executable, execErr := os.Executable()
-		if execErr != nil {
-			return execErr
-		}
-		name := "ffmpeg"
-		if filepath.Ext(executable) == ".exe" {
-			name = "ffmpeg.exe"
-		}
-		binary = filepath.Join(filepath.Dir(executable), name)
-		if _, statErr := os.Stat(binary); statErr != nil {
-			return fmt.Errorf("ffmpeg not found in PATH or beside executable: %w", err)
-		}
+		return err
 	}
 
 	// 如果输出文件已经是 mp4 格式，则不需要添加扩展名
@@ -243,6 +231,7 @@ func (m *M3U8Downloader) convertToMP4(inputFile, outputFile string) error {
 		"-loglevel", "warning", // 减少 ffmpeg 输出
 		outputFile,
 	)
+	configureFFmpegCommand(cmd)
 
 	// 执行命令
 	if output, err := cmd.CombinedOutput(); err != nil {

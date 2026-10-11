@@ -13,7 +13,9 @@ MediaNinja 是一个媒体下载工具，提供 CLI、本地 Web 工作台和 Wi
 | Go | 1.23+ | CLI、HTTP 服务和下载核心 |
 | Node.js | 22.12+ | 前端开发与构建 |
 | pnpm | 10.18.0 | 管理前端和桌面 workspace |
-| ffmpeg | 在 PATH 中，或放在 Go 可执行文件旁 | M3U8 合并；不随安装包分发 |
+| Git for Windows | 包含 Git Bash | 构建随包分发的 ffmpeg |
+
+Windows 桌面安装包与便携版包含 ffmpeg，无需用户额外安装。开发环境可以运行 `pnpm prepare:ffmpeg` 构建并缓存它；`pnpm dev` 会自动使用该缓存。仅通过 `go run` / `go build` 开发时，可设置 `MEDIANINJA_FFMPEG`，或将 ffmpeg 放在程序旁边或 PATH 中。
 
 桌面开发和构建还需要 Rust MSVC 工具链、Visual Studio C++ Build Tools、Windows SDK 和 WebView2 运行时。当前桌面版本以 Windows x64 为目标。
 
@@ -83,7 +85,7 @@ CLI 直接调用 Go 核心，无需先启动 HTTP 服务。
 pnpm build:web
 ```
 
-该命令构建 React，将资源复制到 `server/ui`，再通过 `go:embed` 编入根目录的 `MediaNinja.exe`。分发这个文件即可，用户无需安装 Go 或 Node.js。
+该命令构建 React，将资源复制到 `server/ui`，再通过 `go:embed` 编入根目录的 `MediaNinja.exe`。Windows 构建还会生成根目录的 `ffmpeg.exe` 和 `licenses/ffmpeg`（许可证、对应源码与构建说明）。分发时一起打包这些文件，用户无需安装 Go、Node.js 或 ffmpeg。
 
 双击 `MediaNinja.exe` 会启动本地服务并打开默认浏览器，也可以显式启动或指定端口：
 
@@ -106,7 +108,7 @@ pnpm desktop:build
 apps/desktop/src-tauri/target/release/bundle/nsis/
 ```
 
-安装包包含桌面程序与 Go sidecar；用户无需安装 Go、Node.js 或 Rust。WebView2 缺失时由安装器引导安装。当前安装包未签名，ffmpeg 需要另行提供。
+安装包包含桌面程序、Go sidecar、ffmpeg 及其许可证、对应源码与构建说明；用户无需安装 Go、Node.js、Rust 或 ffmpeg。WebView2 缺失时由安装器引导安装。当前安装包未签名。
 
 桌面窗口关闭时隐藏到托盘；使用托盘菜单的 Quit 退出程序并停止下载服务。
 
@@ -157,3 +159,19 @@ pnpm test:sidecar
 当前配置与任务历史保存在会话内存中，重启后恢复默认配置并清空历史。配置修改只影响新任务。服务面向本机使用，暂不支持远程多用户部署。
 
 架构边界见 [架构说明](docs/architecture.md)，桌面实现与开发细节见 [Web 与 Windows 桌面开发](docs/desktop.md)。
+
+## 版本与发布
+
+根目录 `package.json` 的 `version` 是产品版本来源。以下脚本同步或检查 Tauri 配置、Cargo 包版本和锁文件，不会自动提交、创建 tag 或推送：
+
+```powershell
+pnpm version:set 0.2.0
+pnpm version:check
+pnpm release:build
+```
+
+`release:build` 在 Windows x64 上运行检查、构建和打包，输出到 `release/`：桌面安装包、含 ffmpeg 的便携版 ZIP、ffmpeg 源码与构建配方，以及 `SHA256SUMS.txt`。首次构建会下载并校验固定版本的 ffmpeg 官方源码和便携编译工具链，再从源码编译；后续使用校验过的缓存。Go 成品可通过 `MediaNinja.exe --version` 查看版本、提交和构建时间。
+
+提交版本变更并推送对应 tag，例如 `v0.2.0`，会触发 GitHub Actions。CI 必须确认 tag 与产品版本一致，才会构建并上传到 Release 草稿。检查草稿后在 GitHub 上正式发布。手动运行 workflow 也可以构建，分支运行只上传 Actions artifacts。
+
+详细流程见 [发布说明](docs/releasing.md)。

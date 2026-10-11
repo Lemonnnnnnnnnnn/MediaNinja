@@ -26,8 +26,12 @@
       "icons/icon.ico"
     ],
     "externalBin": [
-      "binaries/medianinja-core"
+      "binaries/medianinja-core",
+      "binaries/ffmpeg"
     ],
+    "resources": {
+      "resources/ffmpeg/": "licenses/ffmpeg/"
+    },
     "windows": {
       "nsis": {
         "displayLanguageSelector": false,

@@ -2,61 +2,87 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
-    name: Build (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        include:
-          - os: ubuntu-latest
-            output: MediaNinja-linux
-          - os: windows-latest
-            output: MediaNinja-windows.exe
-          - os: macos-latest
-            output: MediaNinja-macos
-
-
+    name: Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version-file: go.mod
           cache: true
-
-      - name: Build Binary
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+      - name: Cache pinned FFmpeg source build
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/release-tools
+            .cache/ffmpeg
+          key: ffmpeg-windows-x64-${{ hashFiles('scripts/ffmpeg.lock.json', 'scripts/build-ffmpeg.sh', 'scripts/ffmpeg.mjs') }}
+      - run: pnpm install --frozen-lockfile
+      - name: Verify version and tag
+        shell: pwsh
         run: |
-          go mod tidy
-          go build -v -o ${{ matrix.output }} ./main.go
-
-      - name: Upload Artifact
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            pnpm version:check --tag $env:GITHUB_REF_NAME
+          } else {
+            pnpm version:check
+          }
+      - name: Test, build and package
+        run: pnpm release:build
+      - name: Upload distribution assets
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.output }}
-          path: ${{ matrix.output }}
+          name: medianinja-windows-x64
+          path: release/*
+          if-no-files-found: error
 
   release:
+    name: Create release draft
+    if: github.ref_type == 'tag'
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Download Artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          path: artifacts
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+          name: medianinja-windows-x64
+          path: release
+      - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
+          name: MediaNinja ${{ github.ref_name }}
+          draft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          body_path: release/release-notes.md
+          fail_on_unmatched_files: true
           files: |
-            artifacts/MediaNinja-linux/MediaNinja-linux
-            artifacts/MediaNinja-windows.exe/MediaNinja-windows.exe
-            artifacts/MediaNinja-macos/MediaNinja-macos
-        env:
-
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
+            release/*.exe
+            release/*.zip
+            release/*.tar.xz
+            release/ffmpeg-build.json
+            release/build-ffmpeg.sh
+            release/SHA256SUMS.txt
