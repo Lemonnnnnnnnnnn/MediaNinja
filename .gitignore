@@ -12,6 +12,7 @@ apps/desktop/src-tauri/gen/
 server/ui/assets/
 server/ui/index.html
 server/ui/favicon.ico
+server/ui/logo.png
 server/ui/fonts/
 ffmpeg.exe
 licenses/ffmpeg/

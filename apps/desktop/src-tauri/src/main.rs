@@ -120,7 +120,7 @@ fn main() {
             let exit =
                 MenuItem::with_id(app, "quit", "Quit and stop downloads", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &exit])?;
-            let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))?;
+            let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
             TrayIconBuilder::new()
                 .icon(icon)
                 .tooltip("MediaNinja · Downloads running in the background")

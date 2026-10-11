@@ -52,4 +52,4 @@ Paper Mono 变量字体从 https://paper.design/mono/download 获取，保存在
 
 工作台通过 hash 路由区分 `#/downloads` 单页下载与 `#/batch` 批量下载。主页面只接受页面 URL；Batch 页面单独维护创作者/关键词输入和解析器限制。两页分别保留输入草稿并展示对应类型的任务，但共用 Go 任务队列，History 汇总整个会话。
 
-Settings 提供 General 与 Parsers 两个 Tab；目录、代理和下载引擎归入 General，解析器选项归入 Parsers。两组共用配置草稿，保存时提交全部配置。浮动面板关闭后返回原页面，Batch 页的限制编辑按钮可以直接打开 `#/batch/settings/parsers`。Tab 支持方向键、Home、End 切换。
+Settings 提供 General 与 Parsers 两个 Tab；目录、代理和下载引擎归入 General，解析器选项归入 Parsers。两组共用配置草稿，字段失焦或按 Enter 后自动保存全部有效配置；选择目录立即保存，切换 Tab、关闭面板和启动下载前也会提交修改。无效输入保留在草稿中并显示提示，不会提交给服务；写入串行执行，旧响应不会覆盖新输入，失败可重试。没有手动保存按钮。浮动面板关闭后返回原页面，Batch 页的限制编辑按钮可以直接打开 `#/batch/settings/parsers`。Tab 支持方向键、Home、End 切换。

@@ -8,6 +8,8 @@ import { BatchPage } from '@/pages/batch-page'
 import { FloatingPanel } from '@/components/workspace/floating-panel'
 import { SettingsForm } from '@/components/workspace/settings-form'
 import { TaskCard } from '@/components/workspace/task-card'
+import { createAutosave, type SaveState } from '@/lib/autosave'
+import { settingsIssue } from '@/lib/settings'
 
 const api = new MediaNinjaClient()
 const host = createHost()
@@ -22,6 +24,18 @@ export function App() {
   const [settingsTab, setSettingsTab] = useState<'general' | 'parsers'>(readSettingsTab)
   const [config, setConfig] = useState<Config | null>(null)
   const [draft, setDraft] = useState<Config | null>(null)
+  const draftRef = useRef(draft)
+  draftRef.current = draft
+  const [saveState, setSaveState] = useState<SaveState>({ status: 'saved' })
+  const [settingsSaver] = useState(() => createAutosave<Config>(value => api.saveConfig(value), (saved, current) => {
+    setConfig(saved)
+    if (current) setDraft(saved)
+  }, setSaveState))
+  useEffect(() => () => settingsSaver.cancel(), [settingsSaver])
+  const changeSettings = (next: Config) => {
+    setDraft(next)
+    settingsSaver.stage(next, settingsIssue(next))
+  }
   const [tasks, setTasks] = useState<Task[]>([])
   const [connected, setConnected] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -39,10 +53,10 @@ export function App() {
     setTasks(next)
   }
   useEffect(() => {
-    const update = () => { setPage(readPage()); setPanel(readPanel()); setSettingsTab(readSettingsTab()); setMessage(''); setError('') }
+    const update = () => { void settingsSaver.flush(); setPage(readPage()); setPanel(readPanel()); setSettingsTab(readSettingsTab()); setMessage(''); setError('') }
     window.addEventListener('hashchange', update)
     return () => window.removeEventListener('hashchange', update)
-  }, [])
+  }, [settingsSaver])
   useEffect(() => {
     let alive = true
     let unsubscribe = () => {}
@@ -75,14 +89,21 @@ export function App() {
   const completed = pageTasks.filter(task => task.state === 'completed').length
   const failed = pageTasks.filter(task => task.state === 'failed')
   const visibleTasks = filter === 'active' ? active : filter === 'failed' ? failed : pageTasks
-  const navigate = (next: 'settings' | 'history' | null, tab: 'general' | 'parsers' = 'general') => { location.hash = `/${page}${next ? `/${next}${next === 'settings' && tab === 'parsers' ? '/parsers' : ''}` : ''}` }
+  const navigate = (next: 'settings' | 'history' | null, tab: 'general' | 'parsers' = 'general') => {
+    if (panel === 'settings') void settingsSaver.flush()
+    location.hash = `/${page}${next ? `/${next}${next === 'settings' && tab === 'parsers' ? '/parsers' : ''}` : ''}`
+  }
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (!config || busy) return
     setBusy(true); setError(''); setMessage('')
     try {
+      const state = await settingsSaver.flush()
+      if (state.status !== 'saved') throw new Error(state.message ?? 'Settings have not been saved. Check settings before starting a download.')
+      const options = await api.config()
+      setConfig(options)
       const input = target.trim()
-      await api.submit(page === 'downloads' ? { url: input, options: config } : { names: input.split(/[,，]/).map(name => name.trim()).filter(Boolean), options: config })
+      await api.submit(page === 'downloads' ? { url: input, options } : { names: input.split(/[,，]/).map(name => name.trim()).filter(Boolean), options })
       updateTasks(await api.tasks()); setTarget(''); setFilter('active'); setMessage('Download added to the queue.')
     } catch (error) { setError(errorMessage(error)) } finally { setBusy(false) }
   }
@@ -90,17 +111,11 @@ export function App() {
     try { await api.cancel(id); updateTasks(await api.tasks()) }
     catch (error) { setError(errorMessage(error)) }
   }
-  const save = async (event: FormEvent) => {
-    event.preventDefault()
-    if (!draft) return
-    setBusy(true); setError(''); setMessage('')
-    try {
-      const saved = await api.saveConfig(draft)
-      setConfig(saved); setDraft(saved); setMessage('Settings saved. New downloads will use them.')
-    } catch (error) { setError(errorMessage(error)) } finally { setBusy(false) }
-  }
   const selectDirectory = async () => {
-    try { const selected = await host.selectDirectory(); if (selected) setDraft(current => current && { ...current, OutputDir: selected }) }
+    try {
+      const selected = await host.selectDirectory()
+      if (selected && draftRef.current) { changeSettings({ ...draftRef.current, OutputDir: selected }); await settingsSaver.flush() }
+    }
     catch (error) { setError(errorMessage(error)) }
   }
   const notices = <>{error && <div role="alert" className="notice notice-error"><CircleAlert aria-hidden="true" />{error}</div>}{message && <div role="status" className="notice notice-success"><Check aria-hidden="true" />{message}</div>}</>
@@ -108,7 +123,7 @@ export function App() {
   return <main className="canvas">
     <div inert={panel ? true : undefined}>
     <div className="canvas-grid" aria-hidden="true" />
-    <a className="wordmark" href="#/downloads" aria-label="MediaNinja home"><span className="brand-mark">m<span>↘</span></span><span>MEDIA<br />NINJA<span className="brand-period">.</span></span></a>
+    <a className="wordmark" href="#/downloads" aria-label="MediaNinja home"><img className="brand-mark" src="/logo.png" width="44" height="44" alt="" /><span>MEDIA<br />NINJA<span className="brand-period">.</span></span></a>
     <div className="canvas-tools">
       <span className={`connection ${connected ? 'is-connected' : ''}`} role="status">{connected ? <Wifi /> : <WifiOff />}<span>{connected ? 'ENGINE ONLINE' : loading ? 'CONNECTING' : 'RECONNECTING'}</span></span>
       <Button variant="outline" onClick={() => navigate('history')} aria-label="Open session history"><History /><span>History</span><span className="tool-count">{history.length.toString().padStart(2, '0')}</span></Button>
@@ -132,7 +147,7 @@ export function App() {
     </div>
     {panel && <FloatingPanel title={panel === 'settings' ? 'SETTINGS' : 'SESSION HISTORY'} label={panel === 'settings' ? 'CONTROL ROOM / SETTINGS' : 'ARCHIVE / THIS SESSION'} onClose={() => navigate(null)}>
       {notices}
-      {panel === 'settings' ? draft ? <SettingsForm tab={settingsTab} onTabChange={tab => navigate('settings', tab)} draft={draft} onChange={setDraft} onSave={save} busy={busy} canSelectDirectory={host.canSelectDirectory} onSelectDirectory={selectDirectory} onOpenDirectory={host.kind === 'desktop' && config ? () => void host.openOutputDirectory(config.OutputDir).catch(error => setError(errorMessage(error))) : undefined} /> : <p className="panel-note">Settings will appear when the engine connects.</p> : <><p className="panel-note">Completed, failed and canceled downloads from this session. Records clear when the engine restarts.</p>{history.length ? <div className="task-list">{history.map(task => <TaskCard key={task.id} task={task} onCancel={cancel} />)}</div> : <div className="history-empty"><span aria-hidden="true">[ 00 ]</span><h3>NO FINISHED DOWNLOADS</h3><p>Completed, failed and canceled tasks will appear here.</p></div>}</>}
+      {panel === 'settings' ? draft ? <SettingsForm tab={settingsTab} onTabChange={tab => navigate('settings', tab)} draft={draft} onChange={changeSettings} saveState={saveState} onCommit={() => void settingsSaver.flush()} onRetry={() => { changeSettings(draft); void settingsSaver.flush() }} canSelectDirectory={host.canSelectDirectory} onSelectDirectory={selectDirectory} onOpenDirectory={host.kind === 'desktop' && config ? () => void host.openOutputDirectory(config.OutputDir).catch(error => setError(errorMessage(error))) : undefined} /> : <p className="panel-note">Settings will appear when the engine connects.</p> : <><p className="panel-note">Completed, failed and canceled downloads from this session. Records clear when the engine restarts.</p>{history.length ? <div className="task-list">{history.map(task => <TaskCard key={task.id} task={task} onCancel={cancel} />)}</div> : <div className="history-empty"><span aria-hidden="true">[ 00 ]</span><h3>NO FINISHED DOWNLOADS</h3><p>Completed, failed and canceled tasks will appear here.</p></div>}</>}
     </FloatingPanel>}
   </main>
 }
