@@ -39,7 +39,7 @@ git push origin v0.2.0
 | `ffmpeg-<version>.tar.xz` | 与二进制对应的未修改 FFmpeg 官方源码 |
 | `ffmpeg-build.json`、`build-ffmpeg.sh` | 固定源码与工具链信息、编译参数及构建脚本 |
 
-用户优先下载安装包或便携版。GitHub 自动生成的 Source code 是项目源码，不是可运行的软件。安装程序会处理 WebView2 缺失的情况；下载服务使用本机随机端口。当前设置和历史仍只保留在运行会话内。
+用户优先下载安装包或便携版。GitHub 自动生成的 Source code 是项目源码，不是可运行的软件。安装程序会处理 WebView2 缺失的情况；下载服务使用本机随机端口。设置和历史持久化到每用户配置目录（settings.json 与 tasks.json）。
 
 ## ffmpeg 构建与许可证
 

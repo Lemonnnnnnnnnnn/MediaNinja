@@ -181,7 +181,7 @@ export function App() {
         <div className="queue-bottom"><span>{completed} completed · {failed.length} failed</span><button onClick={() => navigate('history')}>SESSION HISTORY <History /></button></div>
       </section>
     </div>
-    <footer className="canvas-footer"><span>{host.kind === 'desktop' ? 'CLOSE TO TRAY · QUIT TO STOP DOWNLOADS' : 'DOWNLOADS CONTINUE AFTER CLOSING THIS PAGE'}</span><span>SETTINGS LAST FOR THIS SESSION · HISTORY PERSISTS ON THIS MACHINE</span></footer>
+    <footer className="canvas-footer"><span>{host.kind === 'desktop' ? 'CLOSE TO TRAY · QUIT TO STOP DOWNLOADS' : 'DOWNLOADS CONTINUE AFTER CLOSING THIS PAGE'}</span><span>SETTINGS & HISTORY PERSIST ON THIS MACHINE</span></footer>
     </div>
     {panel && <FloatingPanel title={panel === 'settings' ? 'SETTINGS' : 'DOWNLOAD HISTORY'} label={panel === 'settings' ? 'CONTROL ROOM / SETTINGS' : 'ARCHIVE / SAVED RECORDS'} onClose={() => navigate(null)}>
       {notices}

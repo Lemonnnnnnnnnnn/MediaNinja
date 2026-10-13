@@ -52,15 +52,17 @@ var serveCmd = &cobra.Command{
 			return fmt.Errorf("local server requires a loopback IP address")
 		}
 	if stateFile == "" {
-		// 终态任务记录持久化到每用户配置目录；目录不可用时退化为仅内存。
+		// 任务历史与设置持久化到每用户配置目录；目录不可用时退化为仅内存。
 		if dir, err := os.UserConfigDir(); err == nil {
 			stateFile = filepath.Join(dir, "MediaNinja", "tasks.json")
 		}
 	}
+	settingsFile := ""
 	if stateFile != "" {
 		if err := os.MkdirAll(filepath.Dir(stateFile), 0755); err != nil {
 			return err
 		}
+		settingsFile = filepath.Join(filepath.Dir(stateFile), "settings.json")
 	}
 	listener, err := net.Listen("tcp", listenAddress)
 	if err != nil {
@@ -68,8 +70,8 @@ var serveCmd = &cobra.Command{
 	}
 	defer listener.Close()
 	manager := tasks.New(application.Execute, stateFile)
-		defer manager.Close()
-		handler, err := server.New(manager, listener.Addr().String(), defaults)
+	defer manager.Close()
+	handler, err := server.New(manager, listener.Addr().String(), defaults, settingsFile)
 		if err != nil {
 			return err
 		}
@@ -130,6 +132,6 @@ func init() {
 	serveCmd.Flags().StringVar(&listenAddress, "listen", "127.0.0.1:0", "Loopback listen address (port 0 selects an available port)")
 	serveCmd.Flags().BoolVar(&desktopMode, "desktop", false, "Desktop child mode: JSON startup and stdin lifetime control")
 	serveCmd.Flags().StringVar(&frontendDirectory, "frontend-dir", "", "Serve an on-disk frontend build during development")
-	serveCmd.Flags().StringVar(&stateFile, "state", "", "Task history file (defaults to the per-user config directory)")
+	serveCmd.Flags().StringVar(&stateFile, "state", "", "Task history and settings file location (defaults to the per-user config directory)")
 	serveCmd.Flags().BoolVar(&openBrowser, "open", false, "Open the Web UI in the default browser")
 }

@@ -18,7 +18,7 @@ export function SettingsForm({ tab, onTabChange, draft, onChange, saveState, onC
   const number = (key: 'Concurrency' | 'MaxRetries' | 'RetryDelay' | 'MaxPages' | 'MaxVideos', value: string) => onChange({ ...draft, [key]: value === '' ? NaN : Number(value) })
   const numberValue = (value: number) => Number.isFinite(value) ? value : ''
   return <form noValidate onSubmit={event => { event.preventDefault(); onCommit() }} onBlur={event => { if (event.target.tagName === 'INPUT') onCommit() }} className="settings-form">
-    <p className="panel-note">Changes save when you leave a field or press Enter, and apply to new downloads. Existing tasks keep their settings. Settings reset when the engine restarts.</p>
+    <p className="panel-note">Changes save when you leave a field or press Enter, and apply to new downloads. Existing tasks keep their settings. Settings persist on this machine and survive engine restarts.</p>
     <div className={`settings-status settings-status-${saveState.status}`} role={saveState.status === 'error' ? 'alert' : 'status'}>
       {saveState.status === 'saving' ? <LoaderCircle className="animate-spin" /> : saveState.status === 'saved' || saveState.status === 'editing' ? <Check /> : <CircleAlert />}
       <span>{saveState.status === 'editing' ? 'CHANGES APPLY WHEN YOU LEAVE THIS FIELD' : saveState.status === 'saving' ? 'SAVING CHANGES…' : saveState.status === 'saved' ? 'ALL CHANGES APPLIED' : saveState.status === 'invalid' ? saveState.message : `Changes could not be saved. ${saveState.message}`}</span>

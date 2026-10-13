@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Engine settings persist across restarts. Successful changes are written to
+  settings.json next to the task history file; a missing or corrupt file
+  falls back to CLI defaults.
+
 ## 0.1.2
 
 - Batch downloads are a generic source registry: the engine announces batch

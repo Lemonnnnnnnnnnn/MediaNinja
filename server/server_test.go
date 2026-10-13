@@ -9,6 +9,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -22,7 +24,7 @@ func TestAPIAuthValidationAndOutputOwnership(t *testing.T) {
 	defer m.Close()
 	defaults := *config.New()
 	defaults.OutputDir = t.TempDir()
-	s, err := New(m, "127.0.0.1:8080", defaults)
+	s, err := New(m, "127.0.0.1:8080", defaults, "")
 	s.frontend = fstest.MapFS{"index.html": {Data: []byte("<!doctype html><title>MediaNinja</title>")}, "assets/test.js": {Data: []byte("export {}")}}
 	if err != nil {
 		t.Fatal(err)
@@ -83,7 +85,7 @@ func TestAPIAuthValidationAndOutputOwnership(t *testing.T) {
 func TestSSEInitialSnapshot(t *testing.T) {
 	m := tasks.New(application.Execute, "")
 	defer m.Close()
-	s, _ := New(m, "localhost:8080", *config.New())
+	s, _ := New(m, "localhost:8080", *config.New(), "")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	r := httptest.NewRequest("GET", "http://localhost:8080/api/events", nil).WithContext(ctx)
@@ -98,7 +100,7 @@ func TestSSEInitialSnapshot(t *testing.T) {
 func TestFrontendRoutingAndSessionBootstrap(t *testing.T) {
 	m := tasks.New(application.Execute, "")
 	defer m.Close()
-	s, _ := New(m, "127.0.0.1:8080", *config.New())
+	s, _ := New(m, "127.0.0.1:8080", *config.New(), "")
 	s.frontend = fstest.MapFS{"index.html": {Data: []byte("<!doctype html><title>React App</title>")}, "assets/test.js": {Data: []byte("export {}")}}
 	for _, path := range []string{"/", "/settings", "/library/123", "/assets/test.js"} {
 		r := httptest.NewRequest("GET", "http://127.0.0.1:8080"+path, nil)
@@ -128,7 +130,7 @@ func TestConfigurationChangesOnlyAffectNewTasks(t *testing.T) {
 	defer m.Close()
 	cfg := *config.New()
 	cfg.OutputDir = t.TempDir()
-	s, _ := New(m, "127.0.0.1:8080", cfg)
+	s, _ := New(m, "127.0.0.1:8080", cfg, "")
 	call := func(method, path, body string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, "http://127.0.0.1:8080"+path, strings.NewReader(body))
 		r.Header.Set("Authorization", "Bearer "+s.Token())
@@ -177,7 +179,7 @@ func TestBatchSubmitSessionCapabilitiesAndRecordRoutes(t *testing.T) {
 	defer func() { close(release); m.Close() }()
 	defaults := *config.New()
 	defaults.OutputDir = t.TempDir()
-	s, err := New(m, "127.0.0.1:8080", defaults)
+	s, err := New(m, "127.0.0.1:8080", defaults, "")
 	s.frontend = fstest.MapFS{"index.html": {Data: []byte("<!doctype html><title>MediaNinja</title>")}}
 	if err != nil {
 		t.Fatal(err)
@@ -275,5 +277,85 @@ func TestBatchSubmitSessionCapabilitiesAndRecordRoutes(t *testing.T) {
 	}
 	if left := len(m.List()); left != 0 {
 		t.Fatalf("records left after clear: %d", left)
+	}
+}
+
+func TestSettingsPersistence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	m := tasks.New(func(ctx context.Context, r application.Request, o events.Observer) (application.Result, error) {
+		return application.Result{}, nil
+	}, "")
+	defer m.Close()
+	defaults := *config.New()
+	defaults.OutputDir = t.TempDir()
+	s, err := New(m, "127.0.0.1:8080", defaults, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.frontend = fstest.MapFS{"index.html": {Data: []byte("<!doctype html><title>MediaNinja</title>")}}
+	call := func(method, target, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, "http://127.0.0.1:8080"+target, strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer "+s.Token())
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	changed := defaults
+	changed.Concurrency = 7
+	changed.ProxyURL = "http://127.0.0.1:7890"
+	data, _ := json.Marshal(changed)
+	if w := call("PUT", "/api/config", string(data)); w.Code != 200 {
+		t.Fatalf("update config: %d %s", w.Code, w.Body.String())
+	}
+	// 成功更新立即落盘，重启后由文件而非 CLI 默认值接管。
+	reloaded, ok := config.Load(path)
+	if !ok || reloaded.Concurrency != 7 {
+		t.Fatalf("settings not persisted: %+v ok=%v", reloaded, ok)
+	}
+	restarted, err := New(m, "127.0.0.1:8080", defaults, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := restarted.Config(); got.Concurrency != 7 || got.ProxyURL != changed.ProxyURL {
+		t.Fatalf("persisted settings not restored: %+v", got)
+	}
+	// 无效更新不落盘。
+	if w := call("PUT", "/api/config", `{"Concurrency":0}`); w.Code != 400 {
+		t.Fatalf("invalid update accepted: %d", w.Code)
+	}
+	if reloaded, _ := config.Load(path); reloaded.Concurrency != 7 {
+		t.Fatalf("invalid update changed the file: %+v", reloaded)
+	}
+	// 损坏的设置文件回退到 CLI 默认值。
+	if err := os.WriteFile(path, []byte("{broken"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	fallback, err := New(m, "127.0.0.1:8080", defaults, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fallback.Config(); got.Concurrency != defaults.Concurrency || got.ProxyURL != "" {
+		t.Fatalf("corrupt file did not fall back: %+v", got)
+	}
+	// 磁盘不可写时更新报错且不改变内存状态。
+	blocked := filepath.Join(t.TempDir(), "file.txt")
+	if err := os.WriteFile(blocked, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	blockedServer, err := New(m, "127.0.0.1:8080", defaults, filepath.Join(blocked, "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("PUT", "http://127.0.0.1:8080/api/config", strings.NewReader(string(data)))
+	r.Header.Set("Authorization", "Bearer "+blockedServer.Token())
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	blockedServer.ServeHTTP(w, r)
+	if w.Code != 500 {
+		t.Fatalf("unpersistable update: %d", w.Code)
+	}
+	if blockedServer.Config().Concurrency != defaults.Concurrency {
+		t.Fatal("failed persistence changed in-memory settings")
 	}
 }

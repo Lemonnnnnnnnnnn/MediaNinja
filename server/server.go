@@ -24,20 +24,34 @@ import (
 )
 
 type Server struct {
-	mu       sync.RWMutex
-	frontend fs.FS
-	manager  *tasks.Manager
-	token    string
-	host     string
-	defaults config.Config
+	mu           sync.RWMutex
+	frontend     fs.FS
+	manager      *tasks.Manager
+	token        string
+	host         string
+	defaults     config.Config
+	settingsPath string
 }
 
-func New(m *tasks.Manager, host string, defaults config.Config) (*Server, error) {
+// New 创建服务。settingsPath 非空时启动加载持久化设置（无效则回退
+// defaults），并在每次成功更新配置后原子落盘。
+func New(m *tasks.Manager, host string, defaults config.Config, settingsPath string) (*Server, error) {
 	var secret [32]byte
 	if _, err := rand.Read(secret[:]); err != nil {
 		return nil, err
 	}
-	return &Server{manager: m, token: hex.EncodeToString(secret[:]), host: host, defaults: defaults, frontend: embeddedFrontend()}, nil
+	if settingsPath != "" {
+		if loaded, ok := config.Load(settingsPath); ok {
+			defaults = loaded
+		}
+	}
+	output, err := filepath.Abs(defaults.OutputDir)
+	if err == nil {
+		if err := os.MkdirAll(output, 0755); err == nil {
+			defaults.OutputDir = output
+		}
+	}
+	return &Server{manager: m, token: hex.EncodeToString(secret[:]), host: host, defaults: defaults, settingsPath: settingsPath, frontend: embeddedFrontend()}, nil
 }
 func (s *Server) Token() string { return s.token }
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -252,6 +266,10 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	settings.OutputDir = output
+	if err := config.Save(s.settingsPath, settings); err != nil {
+		fail(w, 500, "settings applied but could not be persisted: "+err.Error())
+		return
+	}
 	s.mu.Lock()
 	s.defaults = settings
 	s.mu.Unlock()
