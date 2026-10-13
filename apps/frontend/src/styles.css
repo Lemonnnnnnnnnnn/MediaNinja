@@ -168,11 +168,11 @@ svg { flex-shrink: 0; }
 .settings-unit { border: 1px solid #555e42; padding: 24px; display: grid; gap: 23px; }
 .unit-heading > span { color: var(--acid); font-size: 9px; letter-spacing: 1px; }
 .unit-heading h3 { font-size: 17px; letter-spacing: -.5px; margin: 8px 0 0; font-weight: 700; }
-.settings-field { display: grid; gap: 9px; min-width: 0; }
+.settings-field { display: grid; gap: 9px; align-content: start; min-width: 0; }
 .settings-field > span { font-size: 9px; letter-spacing: .5px; color: #c9cebd; }
 .settings-field > small { font-size: 10px; line-height: 1.6; color: #a5ad93; }
 .directory-field { display: flex; gap: 14px; }
-.settings-columns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.settings-columns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; align-items: start; }
 .two-columns { grid-template-columns: repeat(2, 1fr); }
 .text-action { justify-self: start; font-size: 9px; color: var(--acid); }
 .parser-unit { border: 2px solid #96a267; background: #252a1b; }
