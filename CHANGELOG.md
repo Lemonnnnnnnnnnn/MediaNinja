@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.2
 
 - Batch downloads are a generic source registry: the engine announces batch
   sources via `/api/session`, the UI renders a source-agnostic batch page, and
