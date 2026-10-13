@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Check, CircleAlert, FolderOpen, LoaderCircle } from 'lucide-react'
-import type { Config } from '@medianinja/api-client'
+import type { BatchSiteInfo, Config } from '@medianinja/api-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tabs } from '@/components/ui/tabs'
@@ -9,10 +9,11 @@ import type { SaveState } from '@/lib/autosave'
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return <label className="settings-field"><span>{label}</span>{children}{hint && <small>{hint}</small>}</label>
 }
-export function SettingsForm({ tab, onTabChange, draft, onChange, saveState, onCommit, onRetry, canSelectDirectory, onSelectDirectory, onOpenDirectory }: {
+export function SettingsForm({ tab, onTabChange, draft, onChange, saveState, onCommit, onRetry, canSelectDirectory, onSelectDirectory, onOpenDirectory, sites }: {
   tab: 'general' | 'parsers'; onTabChange: (tab: 'general' | 'parsers') => void
   draft: Config; onChange: (config: Config) => void; saveState: SaveState; onCommit: () => void; onRetry: () => void
   canSelectDirectory: boolean; onSelectDirectory: () => Promise<void>; onOpenDirectory?: () => void
+  sites: BatchSiteInfo[]
 }) {
   const number = (key: 'Concurrency' | 'MaxRetries' | 'RetryDelay' | 'MaxPages' | 'MaxVideos', value: string) => onChange({ ...draft, [key]: value === '' ? NaN : Number(value) })
   const numberValue = (value: number) => Number.isFinite(value) ? value : ''
@@ -35,9 +36,10 @@ export function SettingsForm({ tab, onTabChange, draft, onChange, saveState, onC
     </section>
     </div>}
     {tab === 'parsers' && <div id="settings-panel-parsers" role="tabpanel" aria-labelledby="settings-tab-parsers" tabIndex={0}>
-    <section className="settings-unit parser-unit" aria-labelledby="parser-title"><div className="unit-heading"><span>PARSERS / CUSTOM OPTIONS</span><h3 id="parser-title">PARSER SETTINGS</h3></div>
-      <div className="parser-card"><div className="parser-card-heading"><h4>RULE34 VIDEO</h4><span>CUSTOM OPTIONS</span></div><p>Limits for creator pages and keyword batches.</p><div className="settings-columns two-columns"><Field label="LIST PAGES"><Input required type="number" min={1} value={numberValue(draft.MaxPages)} onChange={event => number('MaxPages', event.target.value)} /></Field><Field label="VIDEO LIMIT" hint="Per creator or keyword. 0 means unlimited."><Input required type="number" min={0} value={numberValue(draft.MaxVideos)} onChange={event => number('MaxVideos', event.target.value)} /></Field></div></div>
-      <div className="parser-defaults"><span>OTHER PARSERS / BUILT-IN DEFAULTS</span><p>Telegraph · DDYS · NTDM · Yingshi · Pornhub · XifanACG</p><small>These parsers currently have no custom settings.</small></div>
+    <section className="settings-unit parser-unit" aria-labelledby="parser-title"><div className="unit-heading"><span>BATCH / PARSER OPTIONS</span><h3 id="parser-title">BATCH SOURCES</h3></div>
+      {sites.map(site => <div className="parser-card" key={site.id}><div className="parser-card-heading"><h4>{site.label}</h4><span>BATCH SOURCE</span></div><p>{site.summary}</p><div className="settings-columns two-columns"><Field label="LIST PAGES"><Input required type="number" min={1} value={numberValue(draft.MaxPages)} onChange={event => number('MaxPages', event.target.value)} /></Field><Field label="ITEM LIMIT" hint="Per name. 0 means unlimited."><Input required type="number" min={0} value={numberValue(draft.MaxVideos)} onChange={event => number('MaxVideos', event.target.value)} /></Field></div></div>)}
+      {!sites.length && <div className="parser-card"><p>No batch sources are registered.</p></div>}
+      <div className="parser-defaults"><span>SINGLE PAGE PARSERS / BUILT-IN DEFAULTS</span><p>Telegraph · DDYS · NTDM · Yingshi · Pornhub · XifanACG</p><small>These parsers currently have no custom settings.</small></div>
     </section>
     </div>}
   </form>

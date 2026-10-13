@@ -15,15 +15,8 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
-// Rule34ListOptions 控制列表页（搜索页/作者页）的抓取行为，由 CLI 命令设置
-type Rule34ListOptions struct {
-	MaxPages    int // 列表页最多抓取多少页（含第一页）
-	MaxVideos   int // 每个列表页最多处理多少个视频，0 表示不限制
-	Concurrency int // 抓取视频子页面的并发数
-}
-
 type Rule34VideoParser struct {
-	options  Rule34ListOptions
+	options  ListOptions
 	client   *client.Client
 	entryURL *url.URL
 	DefaultDownloader
@@ -39,9 +32,12 @@ func NewRule34VideoParser(c *client.Client, pageURL string) *Rule34VideoParser {
 		client:         c,
 		entryURL:       entry,
 		pageByDownload: make(map[string]string),
-		options:        Rule34ListOptions{MaxPages: 1, Concurrency: 4},
+		options:        ListOptions{MaxPages: 1, Concurrency: 4},
 	}
 }
+
+// SetListOptions 注入任务级列表参数（见 ListOptionsAware）。
+func (p *Rule34VideoParser) SetListOptions(options ListOptions) { p.options = options }
 
 type rule34VideoEntry struct {
 	pageURL *url.URL

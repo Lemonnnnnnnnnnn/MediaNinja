@@ -5,6 +5,7 @@ import (
 	"MediaNinja/core/config"
 	"MediaNinja/core/crawler"
 	"MediaNinja/core/events"
+	"MediaNinja/core/parsers"
 	"MediaNinja/core/request/client"
 	"context"
 	"errors"
@@ -13,10 +14,18 @@ import (
 	"strings"
 )
 
+// BatchRequest 表示一次批次下载：在选定批次源上按名称列表枚举条目。
+type BatchRequest struct {
+	Site  string   `json:"site"`
+	Names []string `json:"names"`
+}
+
 type Request struct {
-	URL     string        `json:"url,omitempty"`
-	Names   []string      `json:"names,omitempty"`
-	Options config.Config `json:"options"`
+	URL   string        `json:"url,omitempty"`
+	Batch *BatchRequest `json:"batch,omitempty"`
+	// SkipFiles 列出上次已成功收集的文件名；重跑时跳过这些文件的下载。
+	SkipFiles []string      `json:"skip_files,omitempty"`
+	Options   config.Config `json:"options"`
 }
 type Result struct {
 	Files []crawler.FileResult `json:"files"`
@@ -26,8 +35,8 @@ func (r Request) Validate() error {
 	if err := r.Options.Validate(); err != nil {
 		return err
 	}
-	if (r.URL == "") == (len(r.Names) == 0) {
-		return fmt.Errorf("provide either url or names")
+	if (r.URL == "") == (r.Batch == nil) {
+		return fmt.Errorf("provide either url or batch")
 	}
 	if r.URL != "" {
 		u, err := url.Parse(r.URL)
@@ -35,9 +44,22 @@ func (r Request) Validate() error {
 			return fmt.Errorf("invalid HTTP URL")
 		}
 	}
-	for _, name := range r.Names {
-		if strings.TrimSpace(name) == "" {
-			return fmt.Errorf("name cannot be empty")
+	if r.Batch != nil {
+		if _, err := parsers.GetBatchSource(r.Batch.Site); err != nil {
+			return err
+		}
+		if len(r.Batch.Names) == 0 {
+			return fmt.Errorf("batch requires at least one name")
+		}
+		for _, name := range r.Batch.Names {
+			if strings.TrimSpace(name) == "" {
+				return fmt.Errorf("name cannot be empty")
+			}
+		}
+	}
+	for _, file := range r.SkipFiles {
+		if strings.TrimSpace(file) == "" {
+			return fmt.Errorf("skip file cannot be empty")
 		}
 	}
 	if r.Options.ProxyURL != "" {
@@ -48,47 +70,52 @@ func (r Request) Validate() error {
 	}
 	return nil
 }
+
+// skipSet 返回需要跳过下载的文件名集合。
+func (r Request) skipSet() map[string]bool {
+	if len(r.SkipFiles) == 0 {
+		return nil
+	}
+	skip := make(map[string]bool, len(r.SkipFiles))
+	for _, file := range r.SkipFiles {
+		skip[file] = true
+	}
+	return skip
+}
+
 func Execute(ctx context.Context, r Request, observer events.Observer) (Result, error) {
 	result := Result{Files: []crawler.FileResult{}}
 	if err := r.Validate(); err != nil {
 		return result, err
 	}
 
+	skip := r.skipSet()
 	var failures []error
 	run := func(target string) {
-		execution, err := crawler.NewCrawler(&r.Options).Run(ctx, target, observer)
+		c := crawler.NewCrawler(&r.Options)
+		c.SkipFiles = skip
+		execution, err := c.Run(ctx, target, observer)
 		result.Files = append(result.Files, execution.Files...)
 		if err != nil {
 			failures = append(failures, err)
 		}
 	}
-	if len(r.Names) == 0 {
+	if r.Batch == nil {
 		run(r.URL)
 	} else {
+		source, err := parsers.GetBatchSource(r.Batch.Site)
+		if err != nil {
+			return result, err
+		}
 		c := client.NewClient(r.Options.ProxyURL, r.Options.MaxRetries, r.Options.RetryDelay)
 		c.Context = ctx
-		for _, name := range r.Names {
+		for _, name := range r.Batch.Names {
 			if ctx.Err() != nil {
 				return result, ctx.Err()
 			}
-			escaped := url.PathEscape(strings.TrimSpace(name))
-			target := "https://rule34video.com/models/" + escaped + "/"
-			response, err := c.GetStream("GET", target, nil, nil)
-			// Retry a transient precheck failure before reporting it; only a 404
-			// may switch the author page to search results.
-			if err != nil && ctx.Err() == nil {
-				response, err = c.GetStream("GET", target, nil, nil)
-			}
+			target, err := source.Resolve(c, name)
 			if err != nil {
-				failures = append(failures, fmt.Errorf("%s: %w", name, err))
-				continue
-			}
-			status := response.StatusCode
-			response.Body.Close()
-			if status == 404 {
-				target = "https://rule34video.com/search/" + escaped + "/"
-			} else if status != 200 {
-				failures = append(failures, fmt.Errorf("%s: author page HTTP status %d", name, status))
+				failures = append(failures, err)
 				continue
 			}
 			run(target)

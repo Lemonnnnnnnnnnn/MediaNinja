@@ -94,11 +94,11 @@ func (p *DefaultParser) Parse(html string) (*ParseResult, error) {
 	return nil, fmt.Errorf("unsupported website")
 }
 
-// GetParserWithOptions creates a parser with task-local options.
-func GetParserWithOptions(rawURL string, c *client.Client, options Rule34ListOptions) Parser {
+// GetParserWithOptions creates a parser with task-local list options.
+func GetParserWithOptions(rawURL string, c *client.Client, options ListOptions) Parser {
 	p := GetParser(rawURL, c)
-	if rule, ok := p.(*Rule34VideoParser); ok {
-		rule.options = options
+	if aware, ok := p.(ListOptionsAware); ok {
+		aware.SetListOptions(options)
 	}
 	return p
 }

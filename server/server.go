@@ -4,11 +4,13 @@ package server
 import (
 	"MediaNinja/core/application"
 	"MediaNinja/core/config"
+	"MediaNinja/core/parsers"
 	"MediaNinja/core/tasks"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -64,7 +66,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if r.URL.Path == "/api/session" && r.Method == http.MethodGet {
 		s.setSession(w)
-		writeJSON(w, 200, map[string]int{"protocol": 1})
+		writeJSON(w, 200, map[string]any{"protocol": 1, "batch_sites": parsers.BatchSources()})
 		return
 	}
 	if !strings.HasPrefix(r.URL.Path, "/api/") {
@@ -99,8 +101,53 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(204)
 	})
+	mux.HandleFunc("POST /api/tasks/{id}/retry", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Scope string `json:"scope"`
+		}
+		if r.ContentLength != 0 {
+			d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
+			d.DisallowUnknownFields()
+			if err := d.Decode(&body); err != nil {
+				fail(w, 400, err.Error())
+				return
+			}
+		}
+		t, err := s.manager.Retry(r.PathValue("id"), body.Scope)
+		if err != nil {
+			fail(w, retryStatus(err), err.Error())
+			return
+		}
+		writeJSON(w, 202, t)
+	})
+	mux.HandleFunc("DELETE /api/tasks/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if err := s.manager.Remove(r.PathValue("id")); err != nil {
+			if errors.Is(err, tasks.ErrTaskActive) {
+				fail(w, 409, err.Error())
+			} else {
+				fail(w, 404, err.Error())
+			}
+			return
+		}
+		w.WriteHeader(204)
+	})
+	mux.HandleFunc("DELETE /api/tasks", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, 200, map[string]int{"removed": s.manager.ClearFinished()})
+	})
 	mux.HandleFunc("GET /api/events", s.events)
 	mux.ServeHTTP(w, r)
+}
+
+// retryStatus 把任务服务的可预期错误映射为 HTTP 状态码。
+func retryStatus(err error) int {
+	switch {
+	case errors.Is(err, tasks.ErrTaskNotFound):
+		return 404
+	case errors.Is(err, tasks.ErrTaskActive), errors.Is(err, tasks.ErrNothingFailed):
+		return 409
+	default:
+		return 400
+	}
 }
 func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
@@ -109,9 +156,9 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 	}
 	settings := s.Config()
 	req := struct {
-		URL     string        `json:"url"`
-		Names   []string      `json:"names"`
-		Options config.Config `json:"options"`
+		URL     string                    `json:"url"`
+		Batch   *application.BatchRequest `json:"batch"`
+		Options config.Config             `json:"options"`
 	}{Options: settings}
 	d := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10))
 	d.DisallowUnknownFields()
@@ -125,7 +172,7 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 	}
 	// Output location is owned by the server, never selected by an API caller.
 	req.Options.OutputDir = settings.OutputDir
-	request := application.Request{URL: req.URL, Names: req.Names, Options: req.Options}
+	request := application.Request{URL: req.URL, Batch: req.Batch, Options: req.Options}
 	if err := request.Validate(); err != nil {
 		fail(w, 400, err.Error())
 		return

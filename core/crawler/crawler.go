@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"path/filepath"
@@ -19,12 +20,14 @@ import (
 )
 
 type Crawler struct {
-	observer     events.Observer
-	eventMu      sync.Mutex
-	client       *client.Client
-	parser       parsers.Parser
-	limiter      *concurrent.Limiter
-	outputDir    string
+	observer  events.Observer
+	eventMu   sync.Mutex
+	client    *client.Client
+	parser    parsers.Parser
+	limiter   *concurrent.Limiter
+	outputDir string
+	// SkipFiles 列出无需重新下载的文件名（重试已收集文件时使用）。
+	SkipFiles    map[string]bool
 	currentTitle *string
 	config       *config.Config
 	ioManager    *io.Manager
@@ -63,6 +66,11 @@ func (c *Crawler) emit(e events.Event) {
 	c.eventMu.Lock()
 	defer c.eventMu.Unlock()
 	e.Time = time.Now()
+	// 进度事件携带完整保存路径，文件结果事件携带基础文件名；统一为基础
+	// 文件名，保证同一文件在任务 Progress 映射中是同一个键。
+	if e.File != "" {
+		e.File = e.File[strings.LastIndexAny(e.File, `/\`)+1:]
+	}
 	if c.observer != nil {
 		c.observer(e)
 	}
@@ -80,7 +88,7 @@ func (c *Crawler) Run(ctx context.Context, url string, observer events.Observer)
 	c.client.Observer = c.emit
 	c.emit(events.Event{Type: "analyzing"})
 
-	c.parser = parsers.GetParserWithOptions(url, c.client, parsers.Rule34ListOptions{MaxPages: c.config.MaxPages, MaxVideos: c.config.MaxVideos, Concurrency: c.config.Concurrency})
+	c.parser = parsers.GetParserWithOptions(url, c.client, parsers.ListOptions{MaxPages: c.config.MaxPages, MaxVideos: c.config.MaxVideos, Concurrency: c.config.Concurrency})
 
 	html, err := c.client.Get(url, nil)
 	if err != nil {
@@ -102,6 +110,8 @@ func (c *Crawler) Run(ctx context.Context, url string, observer events.Observer)
 	if len(resultParsed.Media) == 0 && len(resultParsed.Files) == 0 {
 		failures = append(failures, fmt.Errorf("no media found"))
 	}
+	// 计划事件：解析完成后即可得知本轮要收集的文件总数，供任务统计使用。
+	c.emit(events.Event{Type: "plan", Total: int64(len(resultParsed.Media) + len(resultParsed.Files))})
 	record := func(file string, err error) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -120,6 +130,10 @@ func (c *Crawler) Run(ctx context.Context, url string, observer events.Observer)
 		failures = append(failures, err)
 	}
 	for _, file := range resultParsed.Files {
+		if c.SkipFiles[file.Filename] {
+			record(file.Filename, nil)
+			continue
+		}
 		record(file.Filename, c.writeFile(&file, "files"))
 	}
 	c.emit(events.Event{Type: "downloading"})
@@ -128,7 +142,13 @@ func (c *Crawler) Run(ctx context.Context, url string, observer events.Observer)
 			break
 		}
 		mediaInfo := media
-		c.limiter.Execute(func() { record(mediaInfo.Filename, c.downloadMedia(&mediaInfo)) })
+		c.limiter.Execute(func() {
+			if c.SkipFiles[mediaInfo.Filename] {
+				record(mediaInfo.Filename, nil)
+				return
+			}
+			record(mediaInfo.Filename, c.downloadMedia(&mediaInfo))
+		})
 	}
 	c.limiter.Wait()
 	if ctx.Err() != nil {

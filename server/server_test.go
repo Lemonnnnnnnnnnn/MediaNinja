@@ -4,6 +4,7 @@ import (
 	"MediaNinja/core/application"
 	"MediaNinja/core/config"
 	"MediaNinja/core/events"
+	"MediaNinja/core/parsers"
 	"MediaNinja/core/tasks"
 	"context"
 	"encoding/json"
@@ -11,12 +12,13 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 )
 
 func TestAPIAuthValidationAndOutputOwnership(t *testing.T) {
 	m := tasks.New(func(ctx context.Context, r application.Request, o events.Observer) (application.Result, error) {
 		return application.Result{}, nil
-	})
+	}, "")
 	defer m.Close()
 	defaults := *config.New()
 	defaults.OutputDir = t.TempDir()
@@ -79,7 +81,7 @@ func TestAPIAuthValidationAndOutputOwnership(t *testing.T) {
 	}
 }
 func TestSSEInitialSnapshot(t *testing.T) {
-	m := tasks.New(application.Execute)
+	m := tasks.New(application.Execute, "")
 	defer m.Close()
 	s, _ := New(m, "localhost:8080", *config.New())
 	ctx, cancel := context.WithCancel(context.Background())
@@ -94,7 +96,7 @@ func TestSSEInitialSnapshot(t *testing.T) {
 }
 
 func TestFrontendRoutingAndSessionBootstrap(t *testing.T) {
-	m := tasks.New(application.Execute)
+	m := tasks.New(application.Execute, "")
 	defer m.Close()
 	s, _ := New(m, "127.0.0.1:8080", *config.New())
 	s.frontend = fstest.MapFS{"index.html": {Data: []byte("<!doctype html><title>React App</title>")}, "assets/test.js": {Data: []byte("export {}")}}
@@ -122,7 +124,7 @@ func TestFrontendRoutingAndSessionBootstrap(t *testing.T) {
 func TestConfigurationChangesOnlyAffectNewTasks(t *testing.T) {
 	m := tasks.New(func(ctx context.Context, r application.Request, o events.Observer) (application.Result, error) {
 		return application.Result{}, nil
-	})
+	}, "")
 	defer m.Close()
 	cfg := *config.New()
 	cfg.OutputDir = t.TempDir()
@@ -160,5 +162,118 @@ func TestConfigurationChangesOnlyAffectNewTasks(t *testing.T) {
 	}
 	if s.Config().Concurrency != 2 {
 		t.Fatal("invalid config mutated defaults")
+	}
+}
+
+func TestBatchSubmitSessionCapabilitiesAndRecordRoutes(t *testing.T) {
+	release := make(chan struct{})
+	m := tasks.New(func(ctx context.Context, r application.Request, o events.Observer) (application.Result, error) {
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return application.Result{}, ctx.Err()
+	}, "")
+	defer func() { close(release); m.Close() }()
+	defaults := *config.New()
+	defaults.OutputDir = t.TempDir()
+	s, err := New(m, "127.0.0.1:8080", defaults)
+	s.frontend = fstest.MapFS{"index.html": {Data: []byte("<!doctype html><title>MediaNinja</title>")}}
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := func(method, path, body string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, "http://127.0.0.1:8080"+path, strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer "+s.Token())
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	awaitState := func(id, state string) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if task, _ := m.Get(id); task.State == state {
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+		t.Fatalf("task %s never reached %s", id, state)
+	}
+	w := call("GET", "/api/session", "")
+	var session struct {
+		Protocol   int                     `json:"protocol"`
+		BatchSites []parsers.BatchSiteInfo `json:"batch_sites"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &session); err != nil {
+		t.Fatal(err)
+	}
+	if session.Protocol != 1 || len(session.BatchSites) == 0 || session.BatchSites[0].ID == "" {
+		t.Fatalf("batch capabilities missing: %s", w.Body.String())
+	}
+	// Legacy names payloads are rejected: the batch shape is the only contract.
+	if w := call("POST", "/api/tasks", `{"names":["x"]}`); w.Code != 400 {
+		t.Fatalf("legacy names accepted: %d", w.Code)
+	}
+	if w := call("POST", "/api/tasks", `{"batch":{"site":"missing","names":["x"]}}`); w.Code != 400 {
+		t.Fatalf("unknown source accepted: %d %s", w.Code, w.Body.String())
+	}
+	if w := call("POST", "/api/tasks", `{"batch":{"site":"rule34video","names":[]}}`); w.Code != 400 {
+		t.Fatalf("empty names accepted: %d", w.Code)
+	}
+	w = call("POST", "/api/tasks", `{"batch":{"site":"rule34video","names":["ok","bad message"]}}`)
+	if w.Code != 202 {
+		t.Fatalf("batch submit: %d %s", w.Code, w.Body.String())
+	}
+	var batch tasks.Task
+	json.Unmarshal(w.Body.Bytes(), &batch)
+	if batch.Request.Batch == nil || len(batch.Request.Batch.Names) != 2 {
+		t.Fatal("batch request lost")
+	}
+	awaitState(batch.ID, "running")
+	if w := call("POST", "/api/tasks/"+batch.ID+"/retry", `{"scope":"all"}`); w.Code != 409 {
+		t.Fatalf("active task retried: %d", w.Code)
+	}
+	if w := call("DELETE", "/api/tasks/"+batch.ID, ""); w.Code != 409 {
+		t.Fatalf("active task deleted: %d", w.Code)
+	}
+	call("POST", "/api/tasks/"+batch.ID+"/cancel", "")
+	awaitState(batch.ID, "canceled")
+
+	w = call("POST", "/api/tasks", `{"url":"https://example.com"}`)
+	if w.Code != 202 {
+		t.Fatalf("url submit: %d %s", w.Code, w.Body.String())
+	}
+	var finished tasks.Task
+	json.Unmarshal(w.Body.Bytes(), &finished)
+	awaitState(finished.ID, "running")
+	call("POST", "/api/tasks/"+finished.ID+"/cancel", "")
+	awaitState(finished.ID, "canceled")
+	w = call("POST", "/api/tasks/"+finished.ID+"/retry", `{"scope":"all"}`)
+	if w.Code != 202 {
+		t.Fatalf("retry: %d %s", w.Code, w.Body.String())
+	}
+	var retried tasks.Task
+	json.Unmarshal(w.Body.Bytes(), &retried)
+	if retried.RetryOf != finished.ID {
+		t.Fatal("retry source missing")
+	}
+	if w := call("POST", "/api/tasks/"+finished.ID+"/retry", `{"scope":"bogus"}`); w.Code != 400 {
+		t.Fatalf("bogus scope: %d", w.Code)
+	}
+	if w := call("POST", "/api/tasks/missing/retry", `{"scope":"all"}`); w.Code != 404 {
+		t.Fatalf("missing retry: %d", w.Code)
+	}
+	call("POST", "/api/tasks/"+retried.ID+"/cancel", "")
+	awaitState(retried.ID, "canceled")
+	if w := call("DELETE", "/api/tasks/"+finished.ID, ""); w.Code != 204 {
+		t.Fatalf("delete record: %d", w.Code)
+	}
+	if w := call("DELETE", "/api/tasks", ""); w.Code != 200 {
+		t.Fatalf("clear records: %d", w.Code)
+	}
+	if left := len(m.List()); left != 0 {
+		t.Fatalf("records left after clear: %d", left)
 	}
 }

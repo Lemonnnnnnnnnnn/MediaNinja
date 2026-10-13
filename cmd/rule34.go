@@ -20,7 +20,10 @@ var rule34Cmd = &cobra.Command{
 				names = append(names, name)
 			}
 		}
-		_, err := application.Execute(cmd.Context(), application.Request{Names: names, Options: *cfg}, cliObserver)
+		_, err := application.Execute(cmd.Context(), application.Request{
+			Batch:   &application.BatchRequest{Site: "rule34video", Names: names},
+			Options: *cfg,
+		}, cliObserver)
 		return err
 	},
 }

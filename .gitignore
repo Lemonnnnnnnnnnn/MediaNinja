@@ -18,3 +18,4 @@ ffmpeg.exe
 licenses/ffmpeg/
 apps/desktop/src-tauri/resources/ffmpeg/
 release/
+.zcode/

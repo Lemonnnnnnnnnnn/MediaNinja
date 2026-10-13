@@ -52,7 +52,9 @@ export async function prepareFFmpeg() {
   const workspace = resolve(root, `.cache/ffmpeg/build-${key.slice(0, 16)}`)
   removeGenerated(workspace, resolve(root, '.cache/ffmpeg'))
   mkdirSync(workspace, { recursive: true })
-  run('tar', ['-xf', source, '-C', workspace])
+  // GNU tar treats "D:\…" drive paths as remote hosts; --force-local keeps extraction local.
+  const tarFlags = /GNU tar/.test(run('tar', ['--version'], { encoding: 'utf8', stdio: 'pipe' }).stdout) ? ['--force-local'] : []
+  run('tar', [...tarFlags, '-xf', source, '-C', workspace])
   const extracted = resolve(workspace, `ffmpeg-${lock.version}`)
   console.log(`Building FFmpeg ${lock.version} from pinned official source…`)
   const logPath = resolve(workspace, 'build.log')
